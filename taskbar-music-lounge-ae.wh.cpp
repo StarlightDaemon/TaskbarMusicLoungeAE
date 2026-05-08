@@ -4,7 +4,7 @@
 // @description     A native-style music ticker with media controls. Audiobook Edition.
 // @version         4.1.3
 // @author          StarlightDaemon
-// @github          https://github.com/StarlightDaemon/TaskbarMusicLoungeAE
+// @github          https://github.com/StarlightDaemon
 // @include         explorer.exe
 // @compilerOptions -lole32 -ldwmapi -lgdi32 -luser32 -lwindowsapp -lshcore -lgdiplus -lshell32 -lwinhttp
 // @license         MIT
@@ -50,7 +50,7 @@ A media controller that uses Windows 11 native DWM styling for a seamless look.
   $name: Panel Height
 - FontSize: 11
   $name: Font Size
-- ButtonScale: 1.0
+- ButtonScale: "1.0"
   $name: Button Scale (1.0 = Normal, 2.0 = 4K)
 - HideFullscreen: false
   $name: Hide when Fullscreen
@@ -62,7 +62,7 @@ A media controller that uses Windows 11 native DWM styling for a seamless look.
   $name: Y Offset
 - AutoTheme: true
   $name: Auto Theme
-- TextColor: 0xFFFFFF
+- TextColor: "0xFFFFFF"
   $name: Manual Text Color (Hex)
 - BgOpacity: 0
   $name: Acrylic Tint Opacity (0-255). Keep 0 for pure glass.
