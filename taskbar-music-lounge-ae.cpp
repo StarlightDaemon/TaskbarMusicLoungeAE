@@ -1,10 +1,10 @@
 // ==WindhawkMod==
-// @id              taskbar-music-lounge-sd
-// @name            Taskbar Music Lounge SD
-// @description     A native-style music ticker with media controls.
+// @id              taskbar-music-lounge-ae
+// @name            Taskbar Music Lounge AE
+// @description     A native-style music ticker with media controls. Audiobook Edition.
 // @version         4.1.3
 // @author          StarlightDaemon
-// @github          https://github.com/StarlightDaemon/TaskbarMusicLoungeSD
+// @github          https://github.com/StarlightDaemon/TaskbarMusicLoungeAE
 // @include         explorer.exe
 // @compilerOptions -lole32 -ldwmapi -lgdi32 -luser32 -lwindowsapp -lshcore -lgdiplus -lshell32 -lwinhttp
 // @license         MIT
@@ -1337,7 +1337,7 @@ void MediaThread() {
 
     SetLayeredWindowAttributes(g_hMediaWindow, 0, 255, LWA_ALPHA);
 
-    g_hWinHttpSession = WinHttpOpen(L"TaskbarMusicLoungeSD/1.0",
+    g_hWinHttpSession = WinHttpOpen(L"TaskbarMusicLoungeAE/1.0",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
 

@@ -1,4 +1,4 @@
-Taskbar Music Lounge SD — Changelog
+Taskbar Music Lounge AE — Changelog
 =====================================
 
 v4.1.3 - Cleanup: SendInput, deferred RegisterWindowMessage, PickCoverId escape fix, surrogate pair encoding, persistent WinHTTP session

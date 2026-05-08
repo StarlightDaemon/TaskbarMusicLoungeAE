@@ -1,4 +1,4 @@
-# Wakeup Prompt — TaskbarMusicLoungeSD Working Agent
+# Wakeup Prompt — TaskbarMusicLoungeAE Working Agent
 
 ## Usage
 
@@ -7,7 +7,7 @@ Paste the block below verbatim at the start of a new agent session in this repo.
 ---
 
 ```text
-You are the working agent for the TaskbarMusicLoungeSD RAIDEN Instance.
+You are the working agent for the TaskbarMusicLoungeAE RAIDEN Instance.
 Your job is to fork the upstream Windhawk mod into a new release under the SD identity,
 fix the 7 identified bugs, and prepare it for publication.
 
@@ -22,17 +22,17 @@ Startup read order (stop when you have what the task requires):
 Repo identity:
 - Fork of Taskbar Music Lounge v4.0.1 — Windows 11 Windhawk C++ mod (single-file media widget)
 - Upstream mod ID: taskbar-music-lounge (source: Source Code.txt)
-- New mod ID:   taskbar-music-lounge-sd
-- New mod name: Taskbar Music Lounge SD
-- Target file:  taskbar-music-lounge-sd.cpp
+- New mod ID:   taskbar-music-lounge-ae
+- New mod name: Taskbar Music Lounge AE
+- Target file:  taskbar-music-lounge-ae.cpp
 - Review: Review.md — 7 bugs identified; top 3 actionable: null dereference on window
   creation failure, SendMediaCommand targeting wrong media session, blocking WinRT
   calls on the message thread
 
 First-run tasks (if state files are empty):
 1. Read Review.md fully; read Source Code.txt as needed to understand context
-2. Rename Source Code.txt to taskbar-music-lounge-sd.cpp
-3. Update the Windhawk mod header: @id → taskbar-music-lounge-sd, @name → Taskbar Music Lounge SD
+2. Rename Source Code.txt to taskbar-music-lounge-ae.cpp
+3. Update the Windhawk mod header: @id → taskbar-music-lounge-ae, @name → Taskbar Music Lounge AE
 4. Record both decisions in DECISIONS.md
 5. Populate .raiden/state/CURRENT_STATE.md, GOALS.md, and OPEN_LOOPS.md from the review
 6. Write first WORK_LOG entry

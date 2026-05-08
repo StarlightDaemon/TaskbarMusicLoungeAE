@@ -3,7 +3,7 @@
 ## Primary Goal
 
 Produce a shippable fork of Taskbar Music Lounge v4.0.1 under the SD identity
-(`taskbar-music-lounge-sd`) with all 7 identified bugs resolved.
+(`taskbar-music-lounge-ae`) with all 7 identified bugs resolved.
 
 ## Bug Fix Targets (priority order)
 

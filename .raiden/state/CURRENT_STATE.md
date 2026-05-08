@@ -12,8 +12,8 @@
 ### Completed
 
 **Session 1 — Bug fixes (v4.0.1-SD)**
-- [x] Renamed `Source Code.txt` → `taskbar-music-lounge-sd.cpp`
-- [x] Updated mod header: `@id taskbar-music-lounge-sd`, `@name Taskbar Music Lounge SD`
+- [x] Renamed `Source Code.txt` → `taskbar-music-lounge-ae.cpp`
+- [x] Updated mod header: `@id taskbar-music-lounge-ae`, `@name Taskbar Music Lounge AE`
 - [x] Bug 1: null dereference on window creation failure — **fixed** (8b60012)
 - [x] Bug 2: WM_APP collision — **fixed** (2c68642)
 - [x] Bug 3: g_Running dead code — **fixed** (cbea593)
