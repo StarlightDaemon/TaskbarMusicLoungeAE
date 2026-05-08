@@ -286,28 +286,27 @@ void UpdateMediaInfo() {
             auto props = session.TryGetMediaPropertiesAsync().get();
             auto info = session.GetPlaybackInfo();
 
-            // --- Diagnostic logging — remove once Libby GSMTC fields are confirmed ---
-            Wh_Log(L"[DIAG] SourceApp:     %s", session.SourceAppUserModelId().c_str());
-            Wh_Log(L"[DIAG] Title:         %s", props.Title().c_str());
-            Wh_Log(L"[DIAG] Subtitle:      %s", props.Subtitle().c_str());
-            Wh_Log(L"[DIAG] Artist:        %s", props.Artist().c_str());
-            Wh_Log(L"[DIAG] AlbumArtist:   %s", props.AlbumArtist().c_str());
-            Wh_Log(L"[DIAG] AlbumTitle:    %s", props.AlbumTitle().c_str());
-            Wh_Log(L"[DIAG] TrackNumber:   %d / %d", props.TrackNumber(), props.AlbumTrackCount());
-            { auto pt = props.PlaybackType(); Wh_Log(L"[DIAG] PlaybackType:  %d", pt ? (int)pt.Value() : -1); }
-            Wh_Log(L"[DIAG] Thumbnail:     %s", props.Thumbnail() ? L"present" : L"null");
-            // --- End diagnostic logging ---
+            wstring sourceApp = session.SourceAppUserModelId().c_str();
 
             lock_guard<mutex> guard(g_MediaState.lock);
 
             wstring newTitle = props.Title().c_str();
+
+            // Libby (Chrome extension bbcjjjnjadekjghhbjddadjgfc) only populates
+            // Title with the browser tab title: "Libby - <Action>: <BookTitle>".
+            // No other fields are set. Strip the prefix to surface just the book title.
+            if (sourceApp.find(L"bbcjjjnjadekjghhbjddadjgfc") != wstring::npos) {
+                auto pos = newTitle.rfind(L": ");
+                if (pos != wstring::npos)
+                    newTitle = newTitle.substr(pos + 2);
+            }
+
             if (newTitle != g_MediaState.title || g_MediaState.albumArt == nullptr) {
                 if (g_MediaState.albumArt) { delete g_MediaState.albumArt; g_MediaState.albumArt = nullptr; }
                 auto thumbRef = props.Thumbnail();
                 if (thumbRef) {
                     auto stream = thumbRef.OpenReadAsync().get();
                     g_MediaState.albumArt = StreamToBitmap(stream);
-                    Wh_Log(L"[DIAG] Thumbnail load: %s", g_MediaState.albumArt ? L"OK" : L"FAILED (StreamToBitmap returned null)");
                 }
             }
             g_MediaState.title = newTitle;
