@@ -6,7 +6,7 @@
 // @author          StarlightDaemon
 // @github          https://github.com/StarlightDaemon/TaskbarMusicLoungeSD
 // @include         explorer.exe
-// @compilerOptions -lole32 -ldwmapi -lgdi32 -luser32 -lwindowsapp -lshcore -lgdiplus -lshell32
+// @compilerOptions -lole32 -ldwmapi -lgdi32 -luser32 -lwindowsapp -lshcore -lgdiplus -lshell32 -lwinhttp
 // @license         MIT
 // ==/WindhawkMod==
 
@@ -70,6 +70,7 @@ A media controller that uses Windows 11 native DWM styling for a seamless look.
 
 #include <windows.h>
 #include <windowsx.h>
+#include <winhttp.h>
 #include <shobjidl.h>
 #include <shellapi.h>
 #include <dwmapi.h>
@@ -242,6 +243,12 @@ GlobalSystemMediaTransportControlsSession g_ActiveSession = nullptr;
 std::mutex g_SessionMutex;
 std::atomic<bool> g_MediaUpdatePending{false};
 
+// --- Libby cover cache ---
+#define MAX_COVER_CACHE 5
+struct CoverCacheEntry { wstring title; Bitmap* bmp; bool fetched; };
+static vector<CoverCacheEntry> g_CoverCache;
+static mutex g_CoverCacheMutex;
+
 Bitmap* StreamToBitmap(IRandomAccessStreamWithContentType const& stream) {
     if (!stream) return nullptr;
     IStream* nativeStream = nullptr;
@@ -252,6 +259,135 @@ Bitmap* StreamToBitmap(IRandomAccessStreamWithContentType const& stream) {
         delete bmp;
     }
     return nullptr;
+}
+
+// Percent-encodes a title string for use in a URL query parameter.
+static wstring UrlEncodeTitle(const wstring& s) {
+    wstring out;
+    out.reserve(s.size() * 2);
+    for (wchar_t c : s) {
+        if ((c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z') ||
+            (c >= L'0' && c <= L'9') || c == L'-' || c == L'_' || c == L'.' || c == L'~') {
+            out += c;
+        } else if (c == L' ') {
+            out += L'+';
+        } else if (c < 128) {
+            wchar_t buf[4]; swprintf(buf, 4, L"%%%02X", (unsigned)c);
+            out += buf;
+        } else {
+            char utf8[5] = {};
+            int n = WideCharToMultiByte(CP_UTF8, 0, &c, 1, utf8, 4, nullptr, nullptr);
+            for (int i = 0; i < n; i++) {
+                wchar_t buf[4]; swprintf(buf, 4, L"%%%02X", (unsigned char)utf8[i]);
+                out += buf;
+            }
+        }
+    }
+    return out;
+}
+
+// Synchronous HTTPS GET — returns raw response body, empty on any failure.
+static vector<BYTE> HttpsGet(LPCWSTR host, LPCWSTR path) {
+    vector<BYTE> result;
+    HINTERNET hSession = WinHttpOpen(L"TaskbarMusicLoungeSD/1.0",
+        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!hSession) return result;
+
+    HINTERNET hConnect = WinHttpConnect(hSession, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
+    if (!hConnect) { WinHttpCloseHandle(hSession); return result; }
+
+    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", path, nullptr,
+        WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+    if (!hRequest) {
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        return result;
+    }
+
+    if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                           WINHTTP_NO_REQUEST_BODY, 0, 0, 0) &&
+        WinHttpReceiveResponse(hRequest, nullptr)) {
+        DWORD status = 0; DWORD sz = sizeof(status);
+        WinHttpQueryHeaders(hRequest,
+            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            nullptr, &status, &sz, nullptr);
+        if (status == 200) {
+            DWORD read;
+            do {
+                DWORD avail = 0;
+                WinHttpQueryDataAvailable(hRequest, &avail);
+                if (!avail) break;
+                size_t prev = result.size();
+                result.resize(prev + avail);
+                if (!WinHttpReadData(hRequest, result.data() + prev, avail, &read)) break;
+                result.resize(prev + read);
+            } while (read > 0);
+        }
+    }
+    WinHttpCloseHandle(hRequest);
+    WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
+    return result;
+}
+
+// Two-step Open Library lookup: title → cover_i → JPEG bytes → Bitmap*.
+// Returns nullptr on any miss or network failure.
+static Bitmap* FetchOpenLibraryCover(const wstring& title) {
+    wstring searchPath = L"/search.json?q=" + UrlEncodeTitle(title) + L"&fields=cover_i&limit=1";
+    auto jsonBytes = HttpsGet(L"openlibrary.org", searchPath.c_str());
+    if (jsonBytes.empty()) return nullptr;
+
+    string json(jsonBytes.begin(), jsonBytes.end());
+    const char* key = "\"cover_i\":";
+    auto pos = json.find(key);
+    if (pos == string::npos) return nullptr;
+    pos += strlen(key);
+    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) ++pos;
+    if (pos >= json.size() || !isdigit((unsigned char)json[pos])) return nullptr;
+    string coverId;
+    while (pos < json.size() && isdigit((unsigned char)json[pos])) coverId += json[pos++];
+    if (coverId.empty()) return nullptr;
+
+    wstring wCoverId(coverId.begin(), coverId.end());
+    wstring imgPath = L"/b/id/" + wCoverId + L"-L.jpg?default=false";
+    auto imgBytes = HttpsGet(L"covers.openlibrary.org", imgPath.c_str());
+    if (imgBytes.empty()) return nullptr;
+
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, imgBytes.size());
+    if (!hMem) return nullptr;
+    void* p = GlobalLock(hMem);
+    if (!p) { GlobalFree(hMem); return nullptr; }
+    memcpy(p, imgBytes.data(), imgBytes.size());
+    GlobalUnlock(hMem);
+
+    IStream* stream = nullptr;
+    if (FAILED(CreateStreamOnHGlobal(hMem, TRUE, &stream))) { GlobalFree(hMem); return nullptr; }
+    Bitmap* bmp = Bitmap::FromStream(stream);
+    stream->Release();
+    if (!bmp || bmp->GetLastStatus() != Ok) { delete bmp; return nullptr; }
+    return bmp;
+}
+
+// Cache-aware cover fetch. Returns cloned Bitmap* (caller owns) or nullptr on miss.
+// Stores both hits and misses so a failed title is not re-fetched this session.
+static Bitmap* GetOrFetchCover(const wstring& title) {
+    {
+        lock_guard<mutex> lk(g_CoverCacheMutex);
+        for (auto& e : g_CoverCache)
+            if (e.title == title)
+                return (e.fetched && e.bmp) ? e.bmp->Clone() : nullptr;
+    }
+    Bitmap* bmp = FetchOpenLibraryCover(title);
+    {
+        lock_guard<mutex> lk(g_CoverCacheMutex);
+        if (g_CoverCache.size() >= MAX_COVER_CACHE) {
+            delete g_CoverCache.front().bmp;
+            g_CoverCache.erase(g_CoverCache.begin());
+        }
+        g_CoverCache.push_back({title, bmp ? bmp->Clone() : nullptr, true});
+    }
+    return bmp;
 }
 
 void UpdateMediaInfo() {
@@ -281,50 +417,63 @@ void UpdateMediaInfo() {
             g_ActiveSession = session;
         }
 
-        // Blocking IO happens outside g_SessionMutex so SendMediaCommand is not blocked.
         if (session) {
+            // All blocking IO runs outside every lock.
             auto props = session.TryGetMediaPropertiesAsync().get();
-            auto info = session.GetPlaybackInfo();
-
+            auto info  = session.GetPlaybackInfo();
             wstring sourceApp = session.SourceAppUserModelId().c_str();
-
-            lock_guard<mutex> guard(g_MediaState.lock);
 
             wstring newTitle = props.Title().c_str();
 
             // Libby (Chrome extension bbcjjjnjadekjghhbjddadjgfc) only populates
             // Title with the browser tab title: "Libby - <Action>: <BookTitle>".
             // No other fields are set. Strip the prefix to surface just the book title.
-            if (sourceApp.find(L"bbcjjjnjadekjghhbjddadjgfc") != wstring::npos) {
+            bool isLibby = sourceApp.find(L"bbcjjjnjadekjghhbjddadjgfc") != wstring::npos;
+            if (isLibby) {
                 auto pos = newTitle.rfind(L": ");
                 if (pos != wstring::npos)
                     newTitle = newTitle.substr(pos + 2);
             }
 
-            if (newTitle != g_MediaState.title || g_MediaState.albumArt == nullptr) {
-                if (g_MediaState.albumArt) { delete g_MediaState.albumArt; g_MediaState.albumArt = nullptr; }
-                auto thumbRef = props.Thumbnail();
-                if (thumbRef) {
-                    auto stream = thumbRef.OpenReadAsync().get();
-                    g_MediaState.albumArt = StreamToBitmap(stream);
-                    if (g_MediaState.albumArt) {
-                        UINT w = g_MediaState.albumArt->GetWidth(), h = g_MediaState.albumArt->GetHeight();
-                        Color px; g_MediaState.albumArt->GetPixel(w/2, h/2, &px);
-                        Wh_Log(L"[THUMB] %ux%u fmt=0x%X center-pixel=0x%08X (A=%u)", w, h, (UINT)g_MediaState.albumArt->GetPixelFormat(), px.GetValue(), px.GetAlpha());
-                    } else {
-                        Wh_Log(L"[THUMB] StreamToBitmap null");
+            // Briefly check under lock whether we actually need a new cover.
+            bool needCover;
+            {
+                lock_guard<mutex> guard(g_MediaState.lock);
+                needCover = (newTitle != g_MediaState.title || g_MediaState.albumArt == nullptr);
+            }
+
+            // Fetch cover outside all locks — may block for HTTP or WinRT IO.
+            Bitmap* newCover = nullptr;
+            if (needCover) {
+                if (isLibby) {
+                    newCover = GetOrFetchCover(newTitle);
+                } else {
+                    auto thumbRef = props.Thumbnail();
+                    if (thumbRef) {
+                        auto stream = thumbRef.OpenReadAsync().get();
+                        newCover = StreamToBitmap(stream);
                     }
                 }
             }
-            g_MediaState.title = newTitle;
-            g_MediaState.artist = props.Artist().c_str();
-            g_MediaState.isPlaying = (info.PlaybackStatus() == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing);
-            g_MediaState.hasMedia = true;
+
+            {
+                lock_guard<mutex> guard(g_MediaState.lock);
+                if (needCover) {
+                    if (g_MediaState.albumArt) { delete g_MediaState.albumArt; g_MediaState.albumArt = nullptr; }
+                    g_MediaState.albumArt = newCover;
+                    newCover = nullptr;
+                }
+                g_MediaState.title   = newTitle;
+                g_MediaState.artist  = props.Artist().c_str();
+                g_MediaState.isPlaying = (info.PlaybackStatus() == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing);
+                g_MediaState.hasMedia  = true;
+            }
+            if (newCover) delete newCover; // discarded if title changed mid-fetch
         } else {
             lock_guard<mutex> guard(g_MediaState.lock);
             g_MediaState.hasMedia = false;
-            g_MediaState.title = L"No Media";
-            g_MediaState.artist = L"";
+            g_MediaState.title    = L"No Media";
+            g_MediaState.artist   = L"";
             if (g_MediaState.albumArt) { delete g_MediaState.albumArt; g_MediaState.albumArt = nullptr; }
         }
     } catch (...) {
@@ -401,7 +550,6 @@ void DrawMediaPanel(HDC hdc, int width, int height) {
         state.title = g_MediaState.title;
         state.artist = g_MediaState.artist;
         state.albumArt = g_MediaState.albumArt ? g_MediaState.albumArt->Clone() : nullptr;
-        if (g_MediaState.albumArt && !state.albumArt) Wh_Log(L"[THUMB] Clone() returned null");
         state.hasMedia = g_MediaState.hasMedia;
         state.isPlaying = g_MediaState.isPlaying;
     }
@@ -574,6 +722,11 @@ LRESULT CALLBACK MediaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 lock_guard<mutex> slock(g_SessionMutex);
                 g_ActiveSession = nullptr;
                 g_SessionManager = nullptr;
+            }
+            {
+                lock_guard<mutex> lk(g_CoverCacheMutex);
+                for (auto& e : g_CoverCache) delete e.bmp;
+                g_CoverCache.clear();
             }
             PostQuitMessage(0);
             return 0;
