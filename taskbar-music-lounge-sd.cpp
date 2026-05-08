@@ -1151,8 +1151,9 @@ LRESULT CALLBACK MediaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                         IDM_COVER_WRONG,  L"Try Different Cover");
             AppendMenuW(hMenu, MF_STRING | ((!suppressed && !locked) ? MF_ENABLED : MF_GRAYED),
                         IDM_COVER_REMOVE, L"Remove Cover");
-            AppendMenuW(hMenu, MF_STRING | (hasCover ? MF_ENABLED : MF_GRAYED) | (locked ? MF_CHECKED : MF_UNCHECKED),
-                        IDM_COVER_LOCK,   L"Lock Cover");
+            AppendMenuW(hMenu, MF_STRING | (hasCover || locked ? MF_ENABLED : MF_GRAYED),
+                        IDM_COVER_LOCK,
+                        locked ? L"\U0001F512 Unlock Cover" : L"\U0001F513 Lock Cover");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hMenu, MF_STRING | (suppressed ? MF_ENABLED : MF_GRAYED),
                         IDM_COVER_RESET,  L"Restore Cover");
