@@ -172,8 +172,7 @@ struct ModSettings {
 
 // --- Global State ---
 HWND g_hMediaWindow = NULL;
-bool g_Running = true; 
-int g_HoverState = 0; 
+int g_HoverState = 0;
 HWINEVENTHOOK g_TaskbarHook = nullptr; 
 UINT g_TaskbarCreatedMsg = RegisterWindowMessage(L"TaskbarCreated");
 
@@ -839,13 +838,11 @@ std::thread* g_pMediaThread = nullptr;
 BOOL WhTool_ModInit() {
     SetCurrentProcessExplicitAppUserModelID(L"taskbar-music-lounge");
     LoadSettings(); 
-    g_Running = true;
     g_pMediaThread = new std::thread(MediaThread);
     return TRUE;
 }
 
 void WhTool_ModUninit() {
-    g_Running = false;
     if (g_hMediaWindow) SendMessage(g_hMediaWindow, APP_WM_CLOSE, 0, 0);
     if (g_pMediaThread) {
         if (g_pMediaThread->joinable()) g_pMediaThread->join();
