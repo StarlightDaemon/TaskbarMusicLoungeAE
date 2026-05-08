@@ -253,6 +253,7 @@ struct CoverCacheEntry {
     Bitmap* bmp          = nullptr;
     bool    fetched      = false;
     bool    suppressed   = false;  // user chose "Remove Cover"
+    bool    locked       = false;  // user chose "Lock Cover" — no auto-updates
     string  currentCoverId;        // OL cover_i currently displayed
     vector<string> triedCoverIds;  // OL cover_i values already shown
 };
@@ -463,7 +464,7 @@ static Bitmap* GetOrFetchCover(const wstring& title) {
         for (auto& e : g_CoverCache) {
             if (e.title != title) continue;
             if (e.suppressed) return nullptr;
-            if (e.fetched) return e.bmp ? e.bmp->Clone() : nullptr;
+            if (e.locked || e.fetched) return e.bmp ? e.bmp->Clone() : nullptr;
             tried = e.triedCoverIds; // carry tried IDs from HandleCoverWrong
             break;
         }
@@ -759,6 +760,7 @@ void DrawMediaPanel(HDC hdc, int width, int height) {
 #define IDM_COVER_WRONG  2001
 #define IDM_COVER_REMOVE 2002
 #define IDM_COVER_RESET  2003
+#define IDM_COVER_LOCK   2004
 
 static void HandleCoverWrong(HWND hwnd, const wstring& title) {
     vector<string> tried;
@@ -849,6 +851,16 @@ static void HandleCoverReset(HWND hwnd, const wstring& title) {
     {
         lock_guard<mutex> guard(g_MediaState.lock);
         if (g_MediaState.albumArt) { delete g_MediaState.albumArt; g_MediaState.albumArt = nullptr; }
+    }
+    InvalidateRect(hwnd, NULL, FALSE);
+}
+
+static void HandleCoverLock(HWND hwnd, const wstring& title) {
+    {
+        lock_guard<mutex> lk(g_CoverCacheMutex);
+        for (auto& e : g_CoverCache) {
+            if (e.title == title) { e.locked = !e.locked; break; }
+        }
     }
     InvalidateRect(hwnd, NULL, FALSE);
 }
@@ -1122,23 +1134,25 @@ LRESULT CALLBACK MediaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             int artSize = g_Settings.height - 12;
             if (rx < 6 || rx > 6 + artSize || ry < 6 || ry > 6 + artSize) break;
 
-            bool hasCover = false;
-            bool suppressed = false;
+            bool hasCover = false, suppressed = false, locked = false;
             {
                 lock_guard<mutex> lk(g_CoverCacheMutex);
                 for (auto& e : g_CoverCache) {
                     if (e.title != curTitle) continue;
                     hasCover   = (e.bmp != nullptr);
                     suppressed = e.suppressed;
+                    locked     = e.locked;
                     break;
                 }
             }
 
             HMENU hMenu = CreatePopupMenu();
-            AppendMenuW(hMenu, MF_STRING | (hasCover ? MF_ENABLED : MF_GRAYED),
+            AppendMenuW(hMenu, MF_STRING | ((hasCover && !locked) ? MF_ENABLED : MF_GRAYED),
                         IDM_COVER_WRONG,  L"Try Different Cover");
-            AppendMenuW(hMenu, MF_STRING | (suppressed ? MF_GRAYED : MF_ENABLED),
+            AppendMenuW(hMenu, MF_STRING | ((!suppressed && !locked) ? MF_ENABLED : MF_GRAYED),
                         IDM_COVER_REMOVE, L"Remove Cover");
+            AppendMenuW(hMenu, MF_STRING | (hasCover ? MF_ENABLED : MF_GRAYED) | (locked ? MF_CHECKED : MF_UNCHECKED),
+                        IDM_COVER_LOCK,   L"Lock Cover");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(hMenu, MF_STRING | (suppressed ? MF_ENABLED : MF_GRAYED),
                         IDM_COVER_RESET,  L"Restore Cover");
@@ -1147,8 +1161,9 @@ LRESULT CALLBACK MediaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             int cmd = TrackPopupMenu(hMenu, TPM_RIGHTBUTTON | TPM_RETURNCMD,
                                      pt.x, pt.y, 0, hwnd, nullptr);
             DestroyMenu(hMenu);
-            if (cmd == IDM_COVER_WRONG)  HandleCoverWrong(hwnd, curTitle);
+            if      (cmd == IDM_COVER_WRONG)  HandleCoverWrong(hwnd, curTitle);
             else if (cmd == IDM_COVER_REMOVE) HandleCoverRemove(hwnd, curTitle);
+            else if (cmd == IDM_COVER_LOCK)   HandleCoverLock(hwnd, curTitle);
             else if (cmd == IDM_COVER_RESET)  HandleCoverReset(hwnd, curTitle);
             return 0;
         }
