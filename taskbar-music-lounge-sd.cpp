@@ -3,10 +3,11 @@
 // @name            Taskbar Music Lounge SD
 // @description     A native-style music ticker with media controls.
 // @version         4.0.1
-// @author          Hashah2311
-// @github          https://github.com/Hashah2311
+// @author          StarlightDaemon
+// @github          https://github.com/StarlightDaemon/TaskbarMusicLoungeSD
 // @include         explorer.exe
 // @compilerOptions -lole32 -ldwmapi -lgdi32 -luser32 -lwindowsapp -lshcore -lgdiplus -lshell32
+// @license         MIT
 // ==/WindhawkMod==
 
 // ==WindhawkModReadme==
