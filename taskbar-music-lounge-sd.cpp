@@ -793,8 +793,15 @@ void MediaThread() {
         );
     }
 
+    if (!g_hMediaWindow) {
+        Wh_Log(L"Failed to create media window — aborting media thread");
+        GdiplusShutdown(gdiplusToken);
+        winrt::uninit_apartment();
+        return;
+    }
+
     SetLayeredWindowAttributes(g_hMediaWindow, 0, 255, LWA_ALPHA);
-    
+
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);
