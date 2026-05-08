@@ -524,7 +524,7 @@ void RegisterTaskbarHook(HWND hwnd)
 // --- Window Procedure ---
 #define IDT_POLL_MEDIA 1001
 #define IDT_ANIMATION  1002
-#define APP_WM_CLOSE   WM_APP
+#define APP_WM_CLOSE   (WM_APP + 1)
 
 LRESULT CALLBACK MediaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
