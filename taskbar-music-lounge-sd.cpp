@@ -294,7 +294,7 @@ void UpdateMediaInfo() {
             Wh_Log(L"[DIAG] AlbumArtist:   %s", props.AlbumArtist().c_str());
             Wh_Log(L"[DIAG] AlbumTitle:    %s", props.AlbumTitle().c_str());
             Wh_Log(L"[DIAG] TrackNumber:   %d / %d", props.TrackNumber(), props.AlbumTrackCount());
-            Wh_Log(L"[DIAG] PlaybackType:  %d", (int)props.PlaybackType());
+            { auto pt = props.PlaybackType(); Wh_Log(L"[DIAG] PlaybackType:  %d", pt ? (int)pt.Value() : -1); }
             Wh_Log(L"[DIAG] Thumbnail:     %s", props.Thumbnail() ? L"present" : L"null");
             // --- End diagnostic logging ---
 
