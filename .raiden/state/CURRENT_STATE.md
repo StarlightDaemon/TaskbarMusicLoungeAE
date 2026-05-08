@@ -1,35 +1,43 @@
 # Current State
 
-## As of 2026-05-08 (Session 1 — complete)
+## As of 2026-05-08 (Session 2 — complete)
 
 ### Completed
 
+**Session 1 — Bug fixes**
 - [x] Renamed `Source Code.txt` → `taskbar-music-lounge-sd.cpp`
 - [x] Updated mod header: `@id taskbar-music-lounge-sd`, `@name Taskbar Music Lounge SD`
-- [x] Populated DECISIONS.md, GOALS.md, OPEN_LOOPS.md, WORK_LOG.md
-- [x] Scaffold commit made
-- [x] Bug 1: null dereference on window creation failure — **fixed** (commit 8b60012)
-- [x] Bug 4: SendMediaCommand targets wrong session — **fixed** (commit f307a8c)
-- [x] Bug 5: blocking WinRT calls on message thread — **fixed** (commit f307a8c)
-- [x] Bug 2: WM_APP collision — **fixed** (commit 2c68642)
-- [x] Bug 3: g_Running dead code — **fixed** (commit cbea593)
-- [x] Bug 6: scroll offset reset races timer — **fixed** (commit babe4a3)
-- [x] Bug 7: HIWORD/LOWORD mouse coords — **fixed** (commit 39f2d58)
+- [x] Bug 1: null dereference on window creation failure — **fixed** (8b60012)
+- [x] Bug 2: WM_APP collision — **fixed** (2c68642)
+- [x] Bug 3: g_Running dead code — **fixed** (cbea593)
+- [x] Bug 4: SendMediaCommand targets wrong session — **fixed** (f307a8c)
+- [x] Bug 5: blocking WinRT calls on message thread — **fixed** (f307a8c)
+- [x] Bug 6: scroll offset reset races timer — **fixed** (babe4a3)
+- [x] Bug 7: HIWORD/LOWORD mouse coords — **fixed** (39f2d58)
+
+**Session 2 — Libby improvements**
+- [x] Libby title: strip "Libby - Open: " prefix → shows "Wool", "Leviathan" etc.
+- [x] Libby cover: fetch from Open Library Covers API (two-step: title→cover_i→JPEG)
+- [x] Libby cover: exact title match selection to avoid false positives (c5a58f8)
+- [x] Lock hygiene: cover fetch moved outside g_MediaState.lock (f0760f2)
+- [x] WinHTTP: WINHTTP_NO_REQUEST_BODY compile fix (4685c7e)
+- [x] Cover cache: LRU 5-entry in-memory cache with miss sentinels
+- [x] Cleanup: all [THUMB] diagnostic logging removed
 
 ### Active
 
 None.
 
-### Pending
+### Pending — v4.1.0
 
-None. All 7 bugs from Review.md have been resolved.
+- [ ] **F1: Hover-expand panel** — hover over cover art expands widget upward showing large cover + full title/artist. Moderate complexity, held for next version.
 
 ### Blockers
 
 None.
 
-### Next steps (if continued)
+### Next steps
 
-- Integration testing on a live Windows 11 system
-- Increment mod `@version` from 4.0.1 to a new SD release version
-- Publish via Windhawk or distribute .cpp directly
+- Live test cover art for more Libby titles (confirm exact-match logic holds)
+- Increment `@version` from 4.0.1 when ready to publish
+- Begin v4.1.0 with hover-expand panel (F1)
