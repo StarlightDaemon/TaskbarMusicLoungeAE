@@ -1,58 +1,34 @@
 Taskbar Music Lounge AE — Changelog
 =====================================
 
-v4.1.3 - Cleanup: SendInput, deferred RegisterWindowMessage, PickCoverId escape fix, surrogate pair encoding, persistent WinHTTP session
+v1.0.0 — 2026-05-08
+---------------------
+Initial release of the Audiobook Edition fork.
+Based on Taskbar Music Lounge v4.0.1 by Hashah2311 (MIT license).
 
-v4.1.2 - Fixes: suppressed-cover poll short-circuit, GSMTC stale reset, Restore Cover immediate fetch
+  Upstream bug fixes (resolved before v1.0.0 release)
+  - Null dereference on window creation failure.
+  - WM_APP message collision (APP_WM_CLOSE = WM_APP).
+  - Dead g_Running flag removed.
+  - SendMediaCommand targeted wrong GSMTC session.
+  - Blocking WinRT IO ran on the message thread.
+  - IDT_ANIMATION timer not killed when scrolling stopped.
+  - LOWORD/HIWORD mouse coords broke on multi-monitor setups.
 
-v4.1.1 - Bug fixes: cover race guard, mid-fetch title check, lock no-op on evicted entry
+  Libby (libbyapp.com) audiobook support
+  - Strips "Libby - Open: " prefix so the widget shows just the book title.
+  - Fetches cover art from Open Library Covers API; two-pass search (title
+    field then full-text), subtitle stripping, exact title matching only —
+    never shows a cover for the wrong book.
+  - 5-entry in-memory LRU cache; failed titles stored as sentinels so they
+    are not re-fetched within the same session.
+  - Right-click cover menu (Libby only): Try Different Cover, Remove Cover,
+    Lock/Unlock Cover (pins image, greys destructive items), Restore Cover.
 
-v4.1.0 — 2026-05-08 (StarlightDaemon fork)
---------------------------------------------
-Libby (libbyapp.com) audiobook support.
-
-  Cover art
-  - Fetches book cover from Open Library Covers API when Libby is the
-    active media session. No authentication or setup required.
-  - Two-pass search: title-field (precise) then full-text (broader),
-    both with subtitle stripping ("Title: Subtitle" searches "Title").
-  - Exact title matching only — never shows a cover for the wrong book.
-  - 5-entry in-memory LRU cache; misses stored as sentinels so failed
-    titles are not re-fetched within the same session.
-
-  Title
-  - Strips the "Libby - Open: " prefix from GSMTC tab title so the
-    widget shows just the book name (e.g. "Wool", "Leviathan").
-
-  Right-click cover menu (right-click the cover art square, Libby only)
-  - Try Different Cover — fetches the next Open Library candidate,
-    skipping covers already shown.
-  - Remove Cover — suppresses the cover for this title this session.
-  - 🔓 Lock Cover / 🔒 Unlock Cover — pins the current cover image;
-    greys out Try Different Cover and Remove Cover while locked.
-  - Restore Cover — clears suppression and lock; re-fetches on next poll.
-
-  Bug fixes
-  - Fixed race condition where Try Different Cover reverted within one
-    second: poll timer now inherits the exclusion list and the cache
-    entry is updated in-place rather than duplicated.
-  - Fixed cover fetch holding g_MediaState.lock during HTTP IO.
-
-
-v4.0.1-SD — 2026-05-08 (StarlightDaemon fork)
------------------------------------------------
-Fork baseline from upstream taskbar-music-lounge v4.0.1 by Hashah2311.
-Resolved all 7 bugs identified in internal review.
-
-  Bug 1 — Null dereference on window creation failure.
-  Bug 2 — WM_APP message collision (APP_WM_CLOSE = WM_APP).
-  Bug 3 — Dead g_Running flag removed.
-  Bug 4 — SendMediaCommand targeted wrong GSMTC session.
-  Bug 5 — Blocking WinRT IO ran on the message thread.
-  Bug 6 — IDT_ANIMATION timer not killed when scrolling stopped.
-  Bug 7 — LOWORD/HIWORD mouse coords broke on multi-monitor setups.
-
-  Fork: mod ID taskbar-music-lounge-sd, author StarlightDaemon, MIT license.
+  Additional fixes
+  - Cover fetch runs outside g_MediaState.lock (no lock held during HTTP IO).
+  - Race condition: Try Different Cover no longer reverts within one second;
+    poll timer inherits exclusion list and cache entries are updated in-place.
 
 
 ------- Upstream changelog (Hashah2311) below this line -------
@@ -60,6 +36,7 @@ Resolved all 7 bugs identified in internal review.
 4.0.1 (Mar 22, 2026)
 
 Fixes the widget appearing at top-left of screen on startup.
+
 4.0 (Mar 21, 2026)
 
 This version addresses and incorporates multiple suggestions. A detailed diff table has been added to the README.
@@ -77,7 +54,7 @@ Addressed Issues & Fixes:
 Credits: Special thanks to @Cinabutts and @Deykii for code references and the community for testing.
 
 Testing Note: AIMP and MPC-BE integration is implemented but currently untested. Please report any issues with these players.
+
 3.0 (Dec 17, 2025)
 
-Initial release.
 Initial release.

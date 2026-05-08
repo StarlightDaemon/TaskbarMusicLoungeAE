@@ -2,7 +2,7 @@
 // @id              taskbar-music-lounge-ae
 // @name            Taskbar Music Lounge AE
 // @description     A native-style music ticker with media controls. Audiobook Edition.
-// @version         4.1.3
+// @version         1.0.0
 // @author          StarlightDaemon
 // @github          https://github.com/StarlightDaemon
 // @include         explorer.exe
@@ -12,29 +12,23 @@
 
 // ==WindhawkModReadme==
 /*
-# Taskbar Music Lounge
+# Taskbar Music Lounge AE
+
+**Audiobook Edition** — a fork of Taskbar Music Lounge v4.0.1 by Hashah2311, extended with
+Libby audiobook support and upstream bug fixes. Original mod:
+https://windhawk.net/mods/taskbar-music-lounge
 
 A media controller that uses Windows 11 native DWM styling for a seamless look.
-
-## 🚀 v3 vs v4: Major Architecture Shift
-| Feature | v3 (Legacy) | v4 (Current) |
-| :--- | :--- | :--- |
-| **Performance** | Polling Loop (High CPU wakeups) | **Event-Driven** (0% CPU when idle) |
-| **Smoothness** | 1-second delay on moves | **Instant** sync with Taskbar animations |
-| **Compatibility** | Chrome/Spotify only | **Universal** supports all media players |
-| **Visuals** | Square Art, Fixed Size | **Rounded Art**, 4K Scalable Icons, Acrylic Blur, Rounded Art |
-| **Behavior** | Always visible (Clunky) | **Smart Auto-Hide** Hides on fullscreen (Idle, Games, Taskbar Hide) |
 
 ## ✨ Features
 * **Universal Support:** Smart scanning detects active playback from any app, not just the "focused" one.
 * **Album Art:** Displays current track cover art.
-* **Libby Support:** Automatically fetches audiobook cover art from Open Library for Libby (libbyapp.com) sessions. Right-click the cover to try a different cover, remove it, or restore it.
+* **Libby Support:** Automatically fetches audiobook cover art from Open Library for Libby (libbyapp.com) sessions. Right-click the cover to try a different cover, remove it, lock it, or restore it.
 * **Fullscreen Mode:** Hides automatically when running full-screen applications.
 * **Native Look:** Uses Windows 11 hardware-accelerated rounding and acrylic blur.
 * **Idle Timeout:** Optional setting to fade out the widget when music is paused for X seconds.
 * **Controls:** Play/Pause, Next, Previous.
 * **Volume:** Scroll over widget to adjust volume.
-
 
 ## ⚠️ Requirements
 * **Disable Widgets:** Taskbar Settings -> Widgets -> Off.
