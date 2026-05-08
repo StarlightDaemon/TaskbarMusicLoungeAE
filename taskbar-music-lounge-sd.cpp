@@ -237,6 +237,9 @@ void LoadSettings() {
 
 // --- WinRT / GSMTC ---
 GlobalSystemMediaTransportControlsSessionManager g_SessionManager = nullptr;
+GlobalSystemMediaTransportControlsSession g_ActiveSession = nullptr;
+std::mutex g_SessionMutex;
+std::atomic<bool> g_MediaUpdatePending{false};
 
 Bitmap* StreamToBitmap(IRandomAccessStreamWithContentType const& stream) {
     if (!stream) return nullptr;
@@ -251,36 +254,39 @@ Bitmap* StreamToBitmap(IRandomAccessStreamWithContentType const& stream) {
 }
 
 void UpdateMediaInfo() {
+    GlobalSystemMediaTransportControlsSession session = nullptr;
     try {
-        if (!g_SessionManager) {
-            g_SessionManager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
-        }
-        if (!g_SessionManager) return;
-
-        // Iterate ALL sessions to find one that is actively PLAYING.
-        GlobalSystemMediaTransportControlsSession session = nullptr;
-        bool foundActive = false;
-
-        auto sessionsList = g_SessionManager.GetSessions();
-        for (auto const& s : sessionsList) {
-            auto pb = s.GetPlaybackInfo();
-            if (pb && pb.PlaybackStatus() == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing) {
-                session = s;
-                foundActive = true;
-                break;
+        {
+            lock_guard<mutex> slock(g_SessionMutex);
+            if (!g_SessionManager) {
+                g_SessionManager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
             }
+            if (!g_SessionManager) return;
+
+            // Iterate ALL sessions to find one that is actively PLAYING.
+            bool foundActive = false;
+            auto sessionsList = g_SessionManager.GetSessions();
+            for (auto const& s : sessionsList) {
+                auto pb = s.GetPlaybackInfo();
+                if (pb && pb.PlaybackStatus() == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing) {
+                    session = s;
+                    foundActive = true;
+                    break;
+                }
+            }
+            if (!foundActive) {
+                session = g_SessionManager.GetCurrentSession();
+            }
+            g_ActiveSession = session;
         }
 
-        if (!foundActive) {
-            session = g_SessionManager.GetCurrentSession();
-        }
-
+        // Blocking IO happens outside g_SessionMutex so SendMediaCommand is not blocked.
         if (session) {
             auto props = session.TryGetMediaPropertiesAsync().get();
             auto info = session.GetPlaybackInfo();
 
             lock_guard<mutex> guard(g_MediaState.lock);
-            
+
             wstring newTitle = props.Title().c_str();
             if (newTitle != g_MediaState.title || g_MediaState.albumArt == nullptr) {
                 if (g_MediaState.albumArt) { delete g_MediaState.albumArt; g_MediaState.albumArt = nullptr; }
@@ -309,13 +315,11 @@ void UpdateMediaInfo() {
 
 void SendMediaCommand(int cmd) {
     try {
-        if (!g_SessionManager) return;
-        auto session = g_SessionManager.GetCurrentSession();
-        if (session) {
-            if (cmd == 1) session.TrySkipPreviousAsync();
-            else if (cmd == 2) session.TryTogglePlayPauseAsync();
-            else if (cmd == 3) session.TrySkipNextAsync();
-        }
+        lock_guard<mutex> slock(g_SessionMutex);
+        if (!g_ActiveSession) return;
+        if (cmd == 1) g_ActiveSession.TrySkipPreviousAsync();
+        else if (cmd == 2) g_ActiveSession.TryTogglePlayPauseAsync();
+        else if (cmd == 3) g_ActiveSession.TrySkipNextAsync();
     } catch (...) {}
 }
 
@@ -545,7 +549,11 @@ LRESULT CALLBACK MediaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 UnhookWinEvent(g_TaskbarHook);
                 g_TaskbarHook = nullptr;
             }
-            g_SessionManager = nullptr;
+            {
+                lock_guard<mutex> slock(g_SessionMutex);
+                g_ActiveSession = nullptr;
+                g_SessionManager = nullptr;
+            }
             PostQuitMessage(0);
             return 0;
 
@@ -556,7 +564,15 @@ LRESULT CALLBACK MediaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
         case WM_TIMER:
             if (wParam == IDT_POLL_MEDIA) {
-                UpdateMediaInfo();
+                if (!g_MediaUpdatePending.exchange(true)) {
+                    std::thread([hwnd] {
+                        winrt::init_apartment();
+                        UpdateMediaInfo();
+                        g_MediaUpdatePending = false;
+                        winrt::uninit_apartment();
+                        PostMessage(hwnd, WM_APP + 11, 0, 0);
+                    }).detach();
+                }
                 
                 bool shouldHide = false;
 
@@ -671,6 +687,10 @@ LRESULT CALLBACK MediaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             }
             return 0;
         }
+
+        case WM_APP + 11:
+            InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
 
         case WM_MOUSEMOVE: {
             int x = LOWORD(lParam);
