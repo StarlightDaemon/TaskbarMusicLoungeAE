@@ -285,6 +285,18 @@ void UpdateMediaInfo() {
             auto props = session.TryGetMediaPropertiesAsync().get();
             auto info = session.GetPlaybackInfo();
 
+            // --- Diagnostic logging — remove once Libby GSMTC fields are confirmed ---
+            Wh_Log(L"[DIAG] SourceApp:     %s", session.SourceAppUserModelId().c_str());
+            Wh_Log(L"[DIAG] Title:         %s", props.Title().c_str());
+            Wh_Log(L"[DIAG] Subtitle:      %s", props.Subtitle().c_str());
+            Wh_Log(L"[DIAG] Artist:        %s", props.Artist().c_str());
+            Wh_Log(L"[DIAG] AlbumArtist:   %s", props.AlbumArtist().c_str());
+            Wh_Log(L"[DIAG] AlbumTitle:    %s", props.AlbumTitle().c_str());
+            Wh_Log(L"[DIAG] TrackNumber:   %d / %d", props.TrackNumber(), props.AlbumTrackCount());
+            Wh_Log(L"[DIAG] PlaybackType:  %d", (int)props.PlaybackType());
+            Wh_Log(L"[DIAG] Thumbnail:     %s", props.Thumbnail() ? L"present" : L"null");
+            // --- End diagnostic logging ---
+
             lock_guard<mutex> guard(g_MediaState.lock);
 
             wstring newTitle = props.Title().c_str();
@@ -294,6 +306,7 @@ void UpdateMediaInfo() {
                 if (thumbRef) {
                     auto stream = thumbRef.OpenReadAsync().get();
                     g_MediaState.albumArt = StreamToBitmap(stream);
+                    Wh_Log(L"[DIAG] Thumbnail load: %s", g_MediaState.albumArt ? L"OK" : L"FAILED (StreamToBitmap returned null)");
                 }
             }
             g_MediaState.title = newTitle;
