@@ -68,7 +68,8 @@ A media controller that uses Windows 11 native DWM styling for a seamless look.
 // ==/WindhawkModSettings==
 
 #include <windows.h>
-#include <shobjidl.h> 
+#include <windowsx.h>
+#include <shobjidl.h>
 #include <shellapi.h>
 #include <dwmapi.h>
 #include <gdiplus.h>
@@ -692,8 +693,8 @@ LRESULT CALLBACK MediaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             return 0;
 
         case WM_MOUSEMOVE: {
-            int x = LOWORD(lParam);
-            int y = HIWORD(lParam);
+            int x = GET_X_LPARAM(lParam);
+            int y = GET_Y_LPARAM(lParam);
             int artSize = g_Settings.height - 12;
             double scale = g_Settings.buttonScale;
             
