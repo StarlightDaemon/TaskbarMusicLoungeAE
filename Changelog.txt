@@ -1,6 +1,8 @@
 Taskbar Music Lounge SD — Changelog
 =====================================
 
+v4.1.3 - Cleanup: SendInput, deferred RegisterWindowMessage, PickCoverId escape fix, surrogate pair encoding, persistent WinHTTP session
+
 v4.1.2 - Fixes: suppressed-cover poll short-circuit, GSMTC stale reset, Restore Cover immediate fetch
 
 v4.1.1 - Bug fixes: cover race guard, mid-fetch title check, lock no-op on evicted entry

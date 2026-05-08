@@ -2,7 +2,7 @@
 // @id              taskbar-music-lounge-sd
 // @name            Taskbar Music Lounge SD
 // @description     A native-style music ticker with media controls.
-// @version         4.1.2
+// @version         4.1.3
 // @author          StarlightDaemon
 // @github          https://github.com/StarlightDaemon/TaskbarMusicLoungeSD
 // @include         explorer.exe
@@ -179,7 +179,7 @@ struct ModSettings {
 HWND g_hMediaWindow = NULL;
 int g_HoverState = 0;
 HWINEVENTHOOK g_TaskbarHook = nullptr; 
-UINT g_TaskbarCreatedMsg = RegisterWindowMessage(L"TaskbarCreated");
+UINT g_TaskbarCreatedMsg = 0;
 
 // Idle Tracking
 int g_IdleSecondsCounter = 0;
@@ -260,6 +260,7 @@ struct CoverCacheEntry {
 };
 static vector<CoverCacheEntry> g_CoverCache;
 static mutex g_CoverCacheMutex;
+static HINTERNET g_hWinHttpSession = nullptr;
 
 struct CoverResult { Bitmap* bmp = nullptr; string coverId; };
 
@@ -278,23 +279,28 @@ Bitmap* StreamToBitmap(IRandomAccessStreamWithContentType const& stream) {
 // Percent-encodes a title string for use in a URL query parameter.
 static wstring UrlEncodeTitle(const wstring& s) {
     wstring out;
-    out.reserve(s.size() * 2);
-    for (wchar_t c : s) {
+    out.reserve(s.size() * 3);
+    for (size_t i = 0; i < s.size(); ) {
+        wchar_t c = s[i];
         if ((c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z') ||
-            (c >= L'0' && c <= L'9') || c == L'-' || c == L'_' || c == L'.' || c == L'~') {
-            out += c;
+            (c >= L'0' && c <= L'9') ||
+            c == L'-' || c == L'_' || c == L'.' || c == L'~') {
+            out += c; ++i;
         } else if (c == L' ') {
-            out += L'+';
-        } else if (c < 128) {
-            wchar_t buf[4]; swprintf(buf, 4, L"%%%02X", (unsigned)c);
-            out += buf;
+            out += L'+'; ++i;
         } else {
+            // Detect surrogate pair and encode both wchar_t as one Unicode code point.
+            int len = (c >= 0xD800 && c <= 0xDBFF &&
+                       i + 1 < s.size() &&
+                       s[i+1] >= 0xDC00 && s[i+1] <= 0xDFFF) ? 2 : 1;
             char utf8[5] = {};
-            int n = WideCharToMultiByte(CP_UTF8, 0, &c, 1, utf8, 4, nullptr, nullptr);
-            for (int i = 0; i < n; i++) {
-                wchar_t buf[4]; swprintf(buf, 4, L"%%%02X", (unsigned char)utf8[i]);
+            int n = WideCharToMultiByte(CP_UTF8, 0, &s[i], len, utf8, 4, nullptr, nullptr);
+            for (int j = 0; j < n; j++) {
+                wchar_t buf[4];
+                swprintf(buf, 4, L"%%%02X", (unsigned char)utf8[j]);
                 out += buf;
             }
+            i += len;
         }
     }
     return out;
@@ -303,19 +309,16 @@ static wstring UrlEncodeTitle(const wstring& s) {
 // Synchronous HTTPS GET — returns raw response body, empty on any failure.
 static vector<BYTE> HttpsGet(LPCWSTR host, LPCWSTR path) {
     vector<BYTE> result;
-    HINTERNET hSession = WinHttpOpen(L"TaskbarMusicLoungeSD/1.0",
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    HINTERNET hSession = g_hWinHttpSession;
     if (!hSession) return result;
 
     HINTERNET hConnect = WinHttpConnect(hSession, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
-    if (!hConnect) { WinHttpCloseHandle(hSession); return result; }
+    if (!hConnect) return result;
 
     HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", path, nullptr,
         WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
     if (!hRequest) {
         WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
         return result;
     }
 
@@ -341,7 +344,6 @@ static vector<BYTE> HttpsGet(LPCWSTR host, LPCWSTR path) {
     }
     WinHttpCloseHandle(hRequest);
     WinHttpCloseHandle(hConnect);
-    WinHttpCloseHandle(hSession);
     return result;
 }
 
@@ -384,7 +386,14 @@ static string PickCoverId(const string& json,
         auto tp = doc.find("\"title\":\"");
         if (tp != string::npos) {
             tp += strlen("\"title\":\"");
-            while (tp < doc.size() && doc[tp] != '"') docTitle += doc[tp++];
+            while (tp < doc.size() && doc[tp] != '"') {
+                if (doc[tp] == '\\' && tp + 1 < doc.size()) {
+                    ++tp;                    // skip backslash
+                    docTitle += doc[tp++];   // include escaped character literally
+                } else {
+                    docTitle += doc[tp++];
+                }
+            }
             transform(docTitle.begin(), docTitle.end(), docTitle.begin(), ::tolower);
         }
 
@@ -970,9 +979,10 @@ void RegisterTaskbarHook(HWND hwnd)
 
 LRESULT CALLBACK MediaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
-        case WM_CREATE: 
-            UpdateAppearance(hwnd); 
-            SetTimer(hwnd, IDT_POLL_MEDIA, 1000, NULL); 
+        case WM_CREATE:
+            g_TaskbarCreatedMsg = RegisterWindowMessage(L"TaskbarCreated");
+            UpdateAppearance(hwnd);
+            SetTimer(hwnd, IDT_POLL_MEDIA, 1000, NULL);
             RegisterTaskbarHook(hwnd);
             return 0;
 
@@ -1229,8 +1239,14 @@ LRESULT CALLBACK MediaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
         case WM_MOUSEWHEEL: {
             short zDelta = GET_WHEEL_DELTA_WPARAM(wParam);
-            keybd_event(zDelta > 0 ? VK_VOLUME_UP : VK_VOLUME_DOWN, 0, 0, 0);
-            keybd_event(zDelta > 0 ? VK_VOLUME_UP : VK_VOLUME_DOWN, 0, KEYEVENTF_KEYUP, 0);
+            BYTE vk = zDelta > 0 ? VK_VOLUME_UP : VK_VOLUME_DOWN;
+            INPUT inputs[2] = {};
+            inputs[0].type       = INPUT_KEYBOARD;
+            inputs[0].ki.wVk     = vk;
+            inputs[1].type       = INPUT_KEYBOARD;
+            inputs[1].ki.wVk     = vk;
+            inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+            SendInput(2, inputs, sizeof(INPUT));
             return 0;
         }
         case WM_PAINT: {
@@ -1320,6 +1336,10 @@ void MediaThread() {
     }
 
     SetLayeredWindowAttributes(g_hMediaWindow, 0, 255, LWA_ALPHA);
+
+    g_hWinHttpSession = WinHttpOpen(L"TaskbarMusicLoungeSD/1.0",
+        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
