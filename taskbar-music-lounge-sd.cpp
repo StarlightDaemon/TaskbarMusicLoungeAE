@@ -307,10 +307,13 @@ void UpdateMediaInfo() {
                 if (thumbRef) {
                     auto stream = thumbRef.OpenReadAsync().get();
                     g_MediaState.albumArt = StreamToBitmap(stream);
-                    if (g_MediaState.albumArt)
-                        Wh_Log(L"[THUMB] %ux%u fmt=0x%X", g_MediaState.albumArt->GetWidth(), g_MediaState.albumArt->GetHeight(), (UINT)g_MediaState.albumArt->GetPixelFormat());
-                    else
+                    if (g_MediaState.albumArt) {
+                        UINT w = g_MediaState.albumArt->GetWidth(), h = g_MediaState.albumArt->GetHeight();
+                        Color px; g_MediaState.albumArt->GetPixel(w/2, h/2, &px);
+                        Wh_Log(L"[THUMB] %ux%u fmt=0x%X center-pixel=0x%08X (A=%u)", w, h, (UINT)g_MediaState.albumArt->GetPixelFormat(), px.GetValue(), px.GetAlpha());
+                    } else {
                         Wh_Log(L"[THUMB] StreamToBitmap null");
+                    }
                 }
             }
             g_MediaState.title = newTitle;
