@@ -2,7 +2,7 @@
 // @id              taskbar-music-lounge-sd
 // @name            Taskbar Music Lounge SD
 // @description     A native-style music ticker with media controls.
-// @version         4.1.0
+// @version         4.1.2
 // @author          StarlightDaemon
 // @github          https://github.com/StarlightDaemon/TaskbarMusicLoungeSD
 // @include         explorer.exe
@@ -250,12 +250,13 @@ std::atomic<bool> g_MediaUpdatePending{false};
 #define MAX_COVER_CACHE 5
 struct CoverCacheEntry {
     wstring title;
-    Bitmap* bmp          = nullptr;
-    bool    fetched      = false;
-    bool    suppressed   = false;  // user chose "Remove Cover"
-    bool    locked       = false;  // user chose "Lock Cover" — no auto-updates
-    string  currentCoverId;        // OL cover_i currently displayed
-    vector<string> triedCoverIds;  // OL cover_i values already shown
+    Bitmap* bmp             = nullptr;
+    bool    fetched         = false;
+    bool    fetchInProgress = false; // HandleCoverWrong thread is running; poll must not re-fetch
+    bool    suppressed      = false; // user chose "Remove Cover"
+    bool    locked          = false; // user chose "Lock Cover" — no auto-updates
+    string  currentCoverId;          // OL cover_i currently displayed
+    vector<string> triedCoverIds;    // OL cover_i values already shown
 };
 static vector<CoverCacheEntry> g_CoverCache;
 static mutex g_CoverCacheMutex;
@@ -465,6 +466,9 @@ static Bitmap* GetOrFetchCover(const wstring& title) {
             if (e.title != title) continue;
             if (e.suppressed) return nullptr;
             if (e.locked || e.fetched) return e.bmp ? e.bmp->Clone() : nullptr;
+            // HandleCoverWrong's dedicated thread is already fetching — skip to
+            // avoid a duplicate fetch with the same exclusion list.
+            if (e.fetchInProgress) return nullptr;
             tried = e.triedCoverIds; // carry tried IDs from HandleCoverWrong
             break;
         }
@@ -546,6 +550,20 @@ void UpdateMediaInfo() {
                 needCover = (newTitle != g_MediaState.title || g_MediaState.albumArt == nullptr);
             }
 
+            // Issue 4 short-circuit: if Libby title is unchanged and the cache
+            // entry is already suppressed (user removed cover) or is a confirmed
+            // OL miss (fetched=true, bmp==nullptr), skip the GetOrFetchCover call.
+            // The two lock acquisitions are sequential — never nested.
+            if (needCover && isLibby && newTitle == g_MediaState.title) {
+                lock_guard<mutex> clk(g_CoverCacheMutex);
+                for (auto& e : g_CoverCache) {
+                    if (e.title != newTitle) continue;
+                    if (e.suppressed || (e.fetched && e.bmp == nullptr))
+                        needCover = false;
+                    break;
+                }
+            }
+
             // Fetch cover outside all locks — may block for HTTP or WinRT IO.
             Bitmap* newCover = nullptr;
             if (needCover) {
@@ -562,7 +580,9 @@ void UpdateMediaInfo() {
 
             {
                 lock_guard<mutex> guard(g_MediaState.lock);
-                if (needCover) {
+                // Only commit the fetched cover if the title hasn't changed while
+                // the HTTP request was running; otherwise discard the stale bitmap.
+                if (needCover && g_MediaState.title == newTitle) {
                     if (g_MediaState.albumArt) { delete g_MediaState.albumArt; g_MediaState.albumArt = nullptr; }
                     g_MediaState.albumArt = newCover;
                     newCover = nullptr;
@@ -573,7 +593,7 @@ void UpdateMediaInfo() {
                 g_MediaState.hasMedia  = true;
                 g_MediaState.isLibby   = isLibby;
             }
-            if (newCover) delete newCover; // discarded if title changed mid-fetch
+            if (newCover) delete newCover; // discarded if track changed mid-fetch
         } else {
             lock_guard<mutex> guard(g_MediaState.lock);
             g_MediaState.hasMedia = false;
@@ -583,8 +603,17 @@ void UpdateMediaInfo() {
             if (g_MediaState.albumArt) { delete g_MediaState.albumArt; g_MediaState.albumArt = nullptr; }
         }
     } catch (...) {
-        lock_guard<mutex> guard(g_MediaState.lock);
-        g_MediaState.hasMedia = false;
+        // Issue 5: mark no-media under its own lock, then separately clear the
+        // session objects so the next successful poll can re-init via RequestAsync().
+        {
+            lock_guard<mutex> guard(g_MediaState.lock);
+            g_MediaState.hasMedia = false;
+        }
+        {
+            lock_guard<mutex> slock(g_SessionMutex);
+            g_SessionManager = nullptr;
+            g_ActiveSession  = nullptr;
+        }
     }
 }
 
@@ -770,7 +799,8 @@ static void HandleCoverWrong(HWND hwnd, const wstring& title) {
             if (e.title != title) continue;
             tried = e.triedCoverIds;
             delete e.bmp; e.bmp = nullptr;
-            e.fetched = false;
+            e.fetched         = false;
+            e.fetchInProgress = true; // block poll-driven GetOrFetchCover until we finish
             break;
         }
     }
@@ -787,8 +817,9 @@ static void HandleCoverWrong(HWND hwnd, const wstring& title) {
             for (auto& e : g_CoverCache) {
                 if (e.title != title) continue;
                 delete e.bmp;
-                e.bmp     = r.bmp ? r.bmp->Clone() : nullptr;
-                e.fetched = true;
+                e.bmp             = r.bmp ? r.bmp->Clone() : nullptr;
+                e.fetched         = true;
+                e.fetchInProgress = false; // poll may resume
                 if (!r.coverId.empty()) {
                     e.currentCoverId = r.coverId;
                     e.triedCoverIds.push_back(r.coverId);
@@ -853,13 +884,40 @@ static void HandleCoverReset(HWND hwnd, const wstring& title) {
         if (g_MediaState.albumArt) { delete g_MediaState.albumArt; g_MediaState.albumArt = nullptr; }
     }
     InvalidateRect(hwnd, NULL, FALSE);
+
+    // Issue 6: don't wait for the next 1-second poll — kick off an immediate
+    // UpdateMediaInfo fetch so the new cover appears as soon as the OL HTTP
+    // response returns.  If a poll is already in flight, skip (it will see
+    // albumArt==nullptr and call GetOrFetchCover on its own).
+    if (!g_MediaUpdatePending.exchange(true)) {
+        std::thread([hwnd]() {
+            winrt::init_apartment();
+            UpdateMediaInfo();
+            g_MediaUpdatePending = false;
+            winrt::uninit_apartment();
+            PostMessage(hwnd, WM_APP + 11, 0, 0);
+        }).detach();
+    }
 }
 
 static void HandleCoverLock(HWND hwnd, const wstring& title) {
     {
         lock_guard<mutex> lk(g_CoverCacheMutex);
+        bool found = false;
         for (auto& e : g_CoverCache) {
-            if (e.title == title) { e.locked = !e.locked; break; }
+            if (e.title == title) { e.locked = !e.locked; found = true; break; }
+        }
+        if (!found) {
+            // Entry was evicted or never created; treat missing as unlocked → lock it.
+            CoverCacheEntry entry;
+            entry.title   = title;
+            entry.locked  = true;
+            entry.fetched = false; // allow next poll to attempt a cover fetch
+            if (g_CoverCache.size() >= MAX_COVER_CACHE) {
+                delete g_CoverCache.front().bmp;
+                g_CoverCache.erase(g_CoverCache.begin());
+            }
+            g_CoverCache.push_back(move(entry));
         }
     }
     InvalidateRect(hwnd, NULL, FALSE);

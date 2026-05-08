@@ -1,6 +1,13 @@
 # Current State
 
-## As of 2026-05-08 (Session 2 — complete, v4.1.0 released)
+## As of 2026-05-08 (Session 3 — complete, v4.1.1 released)
+
+### Completed
+
+**Session 3 — Bug fixes (v4.1.1)**
+- [x] Bug 1: HandleCoverWrong / poll race — added `fetchInProgress` guard field; poll skips re-fetch while dedicated thread is running
+- [x] Bug 2: mid-fetch title check — commit condition now guards `g_MediaState.title == newTitle` before writing cover
+- [x] Bug 3: HandleCoverLock no-op on evicted entry — creates new locked entry with eviction logic mirroring HandleCoverRemove
 
 ### Completed
 
