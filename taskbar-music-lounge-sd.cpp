@@ -745,6 +745,7 @@ LRESULT CALLBACK MediaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             DrawMediaPanel(memDC, rc.right, rc.bottom);
             
             if (g_IsScrolling) SetTimer(hwnd, IDT_ANIMATION, 16, NULL);
+            else KillTimer(hwnd, IDT_ANIMATION);
 
             BitBlt(hdc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
             SelectObject(memDC, oldBitmap); DeleteObject(memBitmap); DeleteDC(memDC);
