@@ -1,7 +1,7 @@
 // ==WindhawkMod==
 // @id              taskbar-music-lounge-ae
 // @name            Taskbar Music Lounge AE
-// @description     A native-style music ticker with media controls. Audiobook Edition.
+// @description     A native-style music ticker with media controls, with Libby audiobook support.
 // @version         1.0.0
 // @author          StarlightDaemon
 // @github          https://github.com/StarlightDaemon
