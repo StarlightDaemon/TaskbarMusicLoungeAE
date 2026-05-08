@@ -307,6 +307,10 @@ void UpdateMediaInfo() {
                 if (thumbRef) {
                     auto stream = thumbRef.OpenReadAsync().get();
                     g_MediaState.albumArt = StreamToBitmap(stream);
+                    if (g_MediaState.albumArt)
+                        Wh_Log(L"[THUMB] %ux%u fmt=0x%X", g_MediaState.albumArt->GetWidth(), g_MediaState.albumArt->GetHeight(), (UINT)g_MediaState.albumArt->GetPixelFormat());
+                    else
+                        Wh_Log(L"[THUMB] StreamToBitmap null");
                 }
             }
             g_MediaState.title = newTitle;
@@ -394,6 +398,7 @@ void DrawMediaPanel(HDC hdc, int width, int height) {
         state.title = g_MediaState.title;
         state.artist = g_MediaState.artist;
         state.albumArt = g_MediaState.albumArt ? g_MediaState.albumArt->Clone() : nullptr;
+        if (g_MediaState.albumArt && !state.albumArt) Wh_Log(L"[THUMB] Clone() returned null");
         state.hasMedia = g_MediaState.hasMedia;
         state.isPlaying = g_MediaState.isPlaying;
     }
