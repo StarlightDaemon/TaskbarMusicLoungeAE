@@ -2,7 +2,7 @@
 // @id              taskbar-music-lounge-sd
 // @name            Taskbar Music Lounge SD
 // @description     A native-style music ticker with media controls.
-// @version         4.0.1
+// @version         4.1.0
 // @author          StarlightDaemon
 // @github          https://github.com/StarlightDaemon/TaskbarMusicLoungeSD
 // @include         explorer.exe
@@ -28,6 +28,7 @@ A media controller that uses Windows 11 native DWM styling for a seamless look.
 ## ✨ Features
 * **Universal Support:** Smart scanning detects active playback from any app, not just the "focused" one.
 * **Album Art:** Displays current track cover art.
+* **Libby Support:** Automatically fetches audiobook cover art from Open Library for Libby (libbyapp.com) sessions. Right-click the cover to try a different cover, remove it, or restore it.
 * **Fullscreen Mode:** Hides automatically when running full-screen applications.
 * **Native Look:** Uses Windows 11 hardware-accelerated rounding and acrylic blur.
 * **Idle Timeout:** Optional setting to fade out the widget when music is paused for X seconds.
@@ -185,10 +186,11 @@ bool g_IsHiddenByIdle = false;
 
 // Data Model
 struct MediaState {
-    wstring title = L"Waiting for media...";
-    wstring artist = L"";
-    bool isPlaying = false;
-    bool hasMedia = false;
+    wstring title   = L"Waiting for media...";
+    wstring artist  = L"";
+    bool isPlaying  = false;
+    bool hasMedia   = false;
+    bool isLibby    = false;
     Bitmap* albumArt = nullptr;
     mutex lock;
 } g_MediaState;
@@ -245,9 +247,18 @@ std::atomic<bool> g_MediaUpdatePending{false};
 
 // --- Libby cover cache ---
 #define MAX_COVER_CACHE 5
-struct CoverCacheEntry { wstring title; Bitmap* bmp; bool fetched; };
+struct CoverCacheEntry {
+    wstring title;
+    Bitmap* bmp          = nullptr;
+    bool    fetched      = false;
+    bool    suppressed   = false;  // user chose "Remove Cover"
+    string  currentCoverId;        // OL cover_i currently displayed
+    vector<string> triedCoverIds;  // OL cover_i values already shown
+};
 static vector<CoverCacheEntry> g_CoverCache;
 static mutex g_CoverCacheMutex;
+
+struct CoverResult { Bitmap* bmp = nullptr; string coverId; };
 
 Bitmap* StreamToBitmap(IRandomAccessStreamWithContentType const& stream) {
     if (!stream) return nullptr;
@@ -331,18 +342,29 @@ static vector<BYTE> HttpsGet(LPCWSTR host, LPCWSTR path) {
     return result;
 }
 
-// Parse Open Library search results: return cover_i of exact title match,
-// falling back to first result with a cover if no exact match exists.
-static string PickCoverId(const string& json, const string& targetLower) {
-    string firstId, exactId;
+// Strip subtitle after first ':' or ' - ' for cleaner search queries.
+static wstring StripSubtitle(const wstring& title) {
+    auto pos = title.find(L':');
+    if (pos != wstring::npos) return title.substr(0, pos);
+    pos = title.find(L" - ");
+    if (pos != wstring::npos) return title.substr(0, pos);
+    return title;
+}
+
+// Scan Open Library docs JSON for a cover_i that matches either the stripped
+// or full title, skipping any cover IDs already tried. No fallback to first
+// result — returns empty string rather than show the wrong cover.
+static string PickCoverId(const string& json,
+                           const string& strippedLower,
+                           const string& fullLower,
+                           const vector<string>& excluded) {
     auto docsPos = json.find("\"docs\":[");
     if (docsPos == string::npos) return {};
     size_t pos = docsPos + strlen("\"docs\":[");
 
-    while (pos < json.size() && exactId.empty()) {
+    while (pos < json.size()) {
         auto objStart = json.find('{', pos);
         if (objStart == string::npos) break;
-        // Find matching closing brace (no nesting in these docs)
         auto objEnd = json.find('}', objStart);
         if (objEnd == string::npos) break;
         string doc = json.substr(objStart, objEnd - objStart + 1);
@@ -363,44 +385,31 @@ static string PickCoverId(const string& json, const string& targetLower) {
             transform(docTitle.begin(), docTitle.end(), docTitle.begin(), ::tolower);
         }
 
-        if (!coverId.empty()) {
-            if (firstId.empty()) firstId = coverId;
-            if (docTitle == targetLower) exactId = coverId;
+        if (!coverId.empty() &&
+            find(excluded.begin(), excluded.end(), coverId) == excluded.end()) {
+            // Accept: exact stripped match, exact full match, or OL title is
+            // "Stripped Title: Subtitle" / "Stripped Title - Subtitle" form.
+            bool match = (docTitle == strippedLower) ||
+                         (docTitle == fullLower) ||
+                         (docTitle.find(strippedLower + ":") == 0) ||
+                         (docTitle.find(strippedLower + " -") == 0);
+            if (match) return coverId;
         }
         pos = objEnd + 1;
         if (pos < json.size() && json[pos] == ']') break;
     }
-    return exactId.empty() ? firstId : exactId;
+    return {};
 }
 
-// Two-step Open Library lookup: title → cover_i → JPEG bytes → Bitmap*.
-// Uses title-field search and exact-match selection to avoid false positives.
-// Returns nullptr on any miss or network failure.
-static Bitmap* FetchOpenLibraryCover(const wstring& title) {
-    // title= searches the title field specifically (more precise than q=)
-    wstring searchPath = L"/search.json?title=" + UrlEncodeTitle(title) + L"&fields=cover_i,title&limit=5";
-    auto jsonBytes = HttpsGet(L"openlibrary.org", searchPath.c_str());
-    if (jsonBytes.empty()) return nullptr;
-
-    string json(jsonBytes.begin(), jsonBytes.end());
-    string targetLower(title.begin(), title.end());
-    transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
-
-    string coverId = PickCoverId(json, targetLower);
-    if (coverId.empty()) return nullptr;
-
-    wstring wCoverId(coverId.begin(), coverId.end());
-    wstring imgPath = L"/b/id/" + wCoverId + L"-L.jpg?default=false";
-    auto imgBytes = HttpsGet(L"covers.openlibrary.org", imgPath.c_str());
+// Decode raw JPEG bytes into a GDI+ Bitmap.
+static Bitmap* DecodeCoverBytes(const vector<BYTE>& imgBytes) {
     if (imgBytes.empty()) return nullptr;
-
     HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, imgBytes.size());
     if (!hMem) return nullptr;
     void* p = GlobalLock(hMem);
     if (!p) { GlobalFree(hMem); return nullptr; }
     memcpy(p, imgBytes.data(), imgBytes.size());
     GlobalUnlock(hMem);
-
     IStream* stream = nullptr;
     if (FAILED(CreateStreamOnHGlobal(hMem, TRUE, &stream))) { GlobalFree(hMem); return nullptr; }
     Bitmap* bmp = Bitmap::FromStream(stream);
@@ -409,25 +418,66 @@ static Bitmap* FetchOpenLibraryCover(const wstring& title) {
     return bmp;
 }
 
-// Cache-aware cover fetch. Returns cloned Bitmap* (caller owns) or nullptr on miss.
-// Stores both hits and misses so a failed title is not re-fetched this session.
+// Single Open Library search pass: searchParam is either "title" or "q".
+static CoverResult OLSearchPass(const wstring& param, const wstring& query,
+                                 const string& strippedLower, const string& fullLower,
+                                 const vector<string>& excluded) {
+    wstring path = L"/search.json?" + param + L"=" + UrlEncodeTitle(query)
+                 + L"&fields=cover_i,title&limit=5";
+    auto jsonBytes = HttpsGet(L"openlibrary.org", path.c_str());
+    if (jsonBytes.empty()) return {};
+    string json(jsonBytes.begin(), jsonBytes.end());
+    string coverId = PickCoverId(json, strippedLower, fullLower, excluded);
+    if (coverId.empty()) return {};
+    wstring wId(coverId.begin(), coverId.end());
+    auto imgBytes = HttpsGet(L"covers.openlibrary.org",
+                             (L"/b/id/" + wId + L"-L.jpg?default=false").c_str());
+    return { DecodeCoverBytes(imgBytes), coverId };
+}
+
+// Two-pass Open Library fetch: title= (precise) then q= (broader).
+// Skips cover IDs in 'excluded'. Returns nullptr bmp on complete miss.
+static CoverResult FetchOpenLibraryCover(const wstring& title,
+                                          const vector<string>& excluded) {
+    wstring stripped = StripSubtitle(title);
+
+    string strippedLower(stripped.begin(), stripped.end());
+    transform(strippedLower.begin(), strippedLower.end(), strippedLower.begin(), ::tolower);
+    string fullLower(title.begin(), title.end());
+    transform(fullLower.begin(), fullLower.end(), fullLower.begin(), ::tolower);
+
+    CoverResult r = OLSearchPass(L"title", stripped, strippedLower, fullLower, excluded);
+    if (r.bmp) return r;
+    return OLSearchPass(L"q", stripped, strippedLower, fullLower, excluded);
+}
+
+// Cache-aware fetch. Returns Bitmap* owned by caller, or nullptr on miss/suppressed.
 static Bitmap* GetOrFetchCover(const wstring& title) {
     {
         lock_guard<mutex> lk(g_CoverCacheMutex);
-        for (auto& e : g_CoverCache)
-            if (e.title == title)
-                return (e.fetched && e.bmp) ? e.bmp->Clone() : nullptr;
+        for (auto& e : g_CoverCache) {
+            if (e.title != title) continue;
+            if (e.suppressed) return nullptr;
+            if (e.fetched) return e.bmp ? e.bmp->Clone() : nullptr;
+            break;
+        }
     }
-    Bitmap* bmp = FetchOpenLibraryCover(title);
+    CoverResult r = FetchOpenLibraryCover(title, {});
     {
         lock_guard<mutex> lk(g_CoverCacheMutex);
         if (g_CoverCache.size() >= MAX_COVER_CACHE) {
             delete g_CoverCache.front().bmp;
             g_CoverCache.erase(g_CoverCache.begin());
         }
-        g_CoverCache.push_back({title, bmp ? bmp->Clone() : nullptr, true});
+        CoverCacheEntry entry;
+        entry.title          = title;
+        entry.bmp            = r.bmp ? r.bmp->Clone() : nullptr;
+        entry.fetched        = true;
+        entry.currentCoverId = r.coverId;
+        if (!r.coverId.empty()) entry.triedCoverIds.push_back(r.coverId);
+        g_CoverCache.push_back(move(entry));
     }
-    return bmp;
+    return r.bmp;
 }
 
 void UpdateMediaInfo() {
@@ -503,15 +553,17 @@ void UpdateMediaInfo() {
                     g_MediaState.albumArt = newCover;
                     newCover = nullptr;
                 }
-                g_MediaState.title   = newTitle;
-                g_MediaState.artist  = props.Artist().c_str();
+                g_MediaState.title    = newTitle;
+                g_MediaState.artist   = props.Artist().c_str();
                 g_MediaState.isPlaying = (info.PlaybackStatus() == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing);
                 g_MediaState.hasMedia  = true;
+                g_MediaState.isLibby   = isLibby;
             }
             if (newCover) delete newCover; // discarded if title changed mid-fetch
         } else {
             lock_guard<mutex> guard(g_MediaState.lock);
             g_MediaState.hasMedia = false;
+            g_MediaState.isLibby  = false;
             g_MediaState.title    = L"No Media";
             g_MediaState.artist   = L"";
             if (g_MediaState.albumArt) { delete g_MediaState.albumArt; g_MediaState.albumArt = nullptr; }
@@ -688,6 +740,104 @@ void DrawMediaPanel(HDC hdc, int width, int height) {
         g_ScrollOffset = 0;
         graphics.DrawString(fullText.c_str(), -1, &font, PointF((float)textX, textY), &textBrush);
     }
+}
+
+// --- Cover art right-click actions ---
+#define IDM_COVER_WRONG  2001
+#define IDM_COVER_REMOVE 2002
+#define IDM_COVER_RESET  2003
+
+static void HandleCoverWrong(HWND hwnd, const wstring& title) {
+    vector<string> tried;
+    {
+        lock_guard<mutex> lk(g_CoverCacheMutex);
+        for (auto& e : g_CoverCache) {
+            if (e.title != title) continue;
+            tried = e.triedCoverIds;
+            delete e.bmp; e.bmp = nullptr;
+            e.fetched = false;
+            break;
+        }
+    }
+    {
+        lock_guard<mutex> guard(g_MediaState.lock);
+        if (g_MediaState.albumArt) { delete g_MediaState.albumArt; g_MediaState.albumArt = nullptr; }
+    }
+    InvalidateRect(hwnd, NULL, FALSE);
+
+    thread([hwnd, title, tried]() {
+        CoverResult r = FetchOpenLibraryCover(title, tried);
+        {
+            lock_guard<mutex> lk(g_CoverCacheMutex);
+            for (auto& e : g_CoverCache) {
+                if (e.title != title) continue;
+                delete e.bmp;
+                e.bmp     = r.bmp ? r.bmp->Clone() : nullptr;
+                e.fetched = true;
+                if (!r.coverId.empty()) {
+                    e.currentCoverId = r.coverId;
+                    e.triedCoverIds.push_back(r.coverId);
+                }
+                break;
+            }
+        }
+        {
+            lock_guard<mutex> guard(g_MediaState.lock);
+            if (g_MediaState.title == title) {
+                delete g_MediaState.albumArt;
+                g_MediaState.albumArt = r.bmp;
+                r.bmp = nullptr;
+            }
+        }
+        delete r.bmp;
+        PostMessage(hwnd, WM_APP + 11, 0, 0);
+    }).detach();
+}
+
+static void HandleCoverRemove(HWND hwnd, const wstring& title) {
+    {
+        lock_guard<mutex> lk(g_CoverCacheMutex);
+        bool found = false;
+        for (auto& e : g_CoverCache) {
+            if (e.title != title) continue;
+            delete e.bmp; e.bmp = nullptr;
+            e.fetched    = true;
+            e.suppressed = true;
+            found = true;
+            break;
+        }
+        if (!found) {
+            CoverCacheEntry entry;
+            entry.title      = title;
+            entry.fetched    = true;
+            entry.suppressed = true;
+            if (g_CoverCache.size() >= MAX_COVER_CACHE) {
+                delete g_CoverCache.front().bmp;
+                g_CoverCache.erase(g_CoverCache.begin());
+            }
+            g_CoverCache.push_back(move(entry));
+        }
+    }
+    {
+        lock_guard<mutex> guard(g_MediaState.lock);
+        if (g_MediaState.albumArt) { delete g_MediaState.albumArt; g_MediaState.albumArt = nullptr; }
+    }
+    InvalidateRect(hwnd, NULL, FALSE);
+}
+
+static void HandleCoverReset(HWND hwnd, const wstring& title) {
+    {
+        lock_guard<mutex> lk(g_CoverCacheMutex);
+        g_CoverCache.erase(
+            remove_if(g_CoverCache.begin(), g_CoverCache.end(),
+                      [&](const CoverCacheEntry& e){ return e.title == title; }),
+            g_CoverCache.end());
+    }
+    {
+        lock_guard<mutex> guard(g_MediaState.lock);
+        if (g_MediaState.albumArt) { delete g_MediaState.albumArt; g_MediaState.albumArt = nullptr; }
+    }
+    InvalidateRect(hwnd, NULL, FALSE);
 }
 
 // --- Event Hook ---
@@ -943,6 +1093,53 @@ LRESULT CALLBACK MediaWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         case WM_LBUTTONUP:
             if (g_HoverState > 0) SendMediaCommand(g_HoverState);
             return 0;
+
+        case WM_RBUTTONUP: {
+            bool libby = false;
+            wstring curTitle;
+            {
+                lock_guard<mutex> guard(g_MediaState.lock);
+                libby    = g_MediaState.isLibby;
+                curTitle = g_MediaState.title;
+            }
+            if (!libby) break;
+
+            int rx = GET_X_LPARAM(lParam);
+            int ry = GET_Y_LPARAM(lParam);
+            int artSize = g_Settings.height - 12;
+            if (rx < 6 || rx > 6 + artSize || ry < 6 || ry > 6 + artSize) break;
+
+            bool hasCover = false;
+            bool suppressed = false;
+            {
+                lock_guard<mutex> lk(g_CoverCacheMutex);
+                for (auto& e : g_CoverCache) {
+                    if (e.title != curTitle) continue;
+                    hasCover   = (e.bmp != nullptr);
+                    suppressed = e.suppressed;
+                    break;
+                }
+            }
+
+            HMENU hMenu = CreatePopupMenu();
+            AppendMenuW(hMenu, MF_STRING | (hasCover ? MF_ENABLED : MF_GRAYED),
+                        IDM_COVER_WRONG,  L"Try Different Cover");
+            AppendMenuW(hMenu, MF_STRING | (suppressed ? MF_GRAYED : MF_ENABLED),
+                        IDM_COVER_REMOVE, L"Remove Cover");
+            AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(hMenu, MF_STRING | (suppressed ? MF_ENABLED : MF_GRAYED),
+                        IDM_COVER_RESET,  L"Restore Cover");
+
+            POINT pt; GetCursorPos(&pt);
+            int cmd = TrackPopupMenu(hMenu, TPM_RIGHTBUTTON | TPM_RETURNCMD,
+                                     pt.x, pt.y, 0, hwnd, nullptr);
+            DestroyMenu(hMenu);
+            if (cmd == IDM_COVER_WRONG)  HandleCoverWrong(hwnd, curTitle);
+            else if (cmd == IDM_COVER_REMOVE) HandleCoverRemove(hwnd, curTitle);
+            else if (cmd == IDM_COVER_RESET)  HandleCoverReset(hwnd, curTitle);
+            return 0;
+        }
+
         case WM_MOUSEWHEEL: {
             short zDelta = GET_WHEEL_DELTA_WPARAM(wParam);
             keybd_event(zDelta > 0 ? VK_VOLUME_UP : VK_VOLUME_DOWN, 0, 0, 0);
