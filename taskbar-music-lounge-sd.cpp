@@ -306,7 +306,7 @@ static vector<BYTE> HttpsGet(LPCWSTR host, LPCWSTR path) {
     }
 
     if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                           WINHTTP_NO_REQUEST_BODY, 0, 0, 0) &&
+                           nullptr, 0, 0, 0) &&
         WinHttpReceiveResponse(hRequest, nullptr)) {
         DWORD status = 0; DWORD sz = sizeof(status);
         WinHttpQueryHeaders(hRequest,
