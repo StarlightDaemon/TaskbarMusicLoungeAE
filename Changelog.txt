@@ -1,0 +1,24 @@
+4.0.1 (Mar 22, 2026)
+
+Fixes the widget appearing at top-left of screen on startup.
+4.0 (Mar 21, 2026)
+
+This version addresses and incorporates multiple suggestions. A detailed diff table has been added to the README.
+
+Addressed Issues & Fixes:
+
+    #3666395914 - Add AppID for compatibility with taskbar auto-hide mod
+    #3666527577 - Rounded corners, scalable icons for high-DPI, hide during fullscreen gaming
+    2eddf69 - Fix widget lagging behind taskbar with smooth following
+    #3671818092 - Support for AIMP/MPC-BE players, larger 4K icons, fullscreen hide option
+    #2828 - Event-driven positioning for smoother auto-hide and fullscreen sync
+    #3689038965 - Comprehensive rework fixing auto-hide lag, fullscreen detection, and high-DPI scaling
+    #3690241518 - Auto-hide widget when no media is playing
+
+Credits: Special thanks to @Cinabutts and @Deykii for code references and the community for testing.
+
+Testing Note: AIMP and MPC-BE integration is implemented but currently untested. Please report any issues with these players.
+3.0 (Dec 17, 2025)
+
+Initial release.
+Initial release.
