@@ -82,6 +82,7 @@ A media controller that uses Windows 11 native DWM styling for a seamless look.
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include <algorithm>
 #include <cstdio>
 
 // WinRT
@@ -452,30 +453,42 @@ static CoverResult FetchOpenLibraryCover(const wstring& title,
 }
 
 // Cache-aware fetch. Returns Bitmap* owned by caller, or nullptr on miss/suppressed.
+// If the entry exists but fetched=false (HandleCoverWrong cleared it), the existing
+// triedCoverIds are passed to the fetch so the poll thread cannot race back to the
+// same wrong cover. Updates the existing entry in-place rather than pushing a duplicate.
 static Bitmap* GetOrFetchCover(const wstring& title) {
+    vector<string> tried;
     {
         lock_guard<mutex> lk(g_CoverCacheMutex);
         for (auto& e : g_CoverCache) {
             if (e.title != title) continue;
             if (e.suppressed) return nullptr;
             if (e.fetched) return e.bmp ? e.bmp->Clone() : nullptr;
+            tried = e.triedCoverIds; // carry tried IDs from HandleCoverWrong
             break;
         }
     }
-    CoverResult r = FetchOpenLibraryCover(title, {});
+    CoverResult r = FetchOpenLibraryCover(title, tried);
     {
         lock_guard<mutex> lk(g_CoverCacheMutex);
-        if (g_CoverCache.size() >= MAX_COVER_CACHE) {
-            delete g_CoverCache.front().bmp;
-            g_CoverCache.erase(g_CoverCache.begin());
+        // Update existing entry if present; otherwise create a new one.
+        CoverCacheEntry* target = nullptr;
+        for (auto& e : g_CoverCache)
+            if (e.title == title) { target = &e; break; }
+        if (!target) {
+            if (g_CoverCache.size() >= MAX_COVER_CACHE) {
+                delete g_CoverCache.front().bmp;
+                g_CoverCache.erase(g_CoverCache.begin());
+            }
+            g_CoverCache.push_back({});
+            target = &g_CoverCache.back();
+            target->title = title;
         }
-        CoverCacheEntry entry;
-        entry.title          = title;
-        entry.bmp            = r.bmp ? r.bmp->Clone() : nullptr;
-        entry.fetched        = true;
-        entry.currentCoverId = r.coverId;
-        if (!r.coverId.empty()) entry.triedCoverIds.push_back(r.coverId);
-        g_CoverCache.push_back(move(entry));
+        delete target->bmp;
+        target->bmp            = r.bmp ? r.bmp->Clone() : nullptr;
+        target->fetched        = true;
+        target->currentCoverId = r.coverId;
+        if (!r.coverId.empty()) target->triedCoverIds.push_back(r.coverId);
     }
     return r.bmp;
 }
