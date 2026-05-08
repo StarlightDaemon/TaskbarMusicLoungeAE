@@ -26,33 +26,63 @@ All 7 bugs resolved. No open loops. Mod is ready for integration testing.
 
 ---
 
-## 2026-05-08 — Session 2: Libby cover art + title improvements
+## 2026-05-08 — Session 2: Libby cover art, right-click menu, v4.1.0 release
 
 **Agent:** RAIDEN working agent (claude-sonnet-4-6)
 
 ### Actions taken
 
 1. Researched Libby/OverDrive cover art options; concluded Open Library Covers API is best no-auth path.
-2. Researched Open Library API in depth: rate limits, coverage, caching, stability, WinHTTP notes.
+2. Researched Open Library API in depth: rate limits (100 req/5min), coverage (~70% popular titles), caching, stability (15yr uptime), WinHTTP implementation notes.
 3. Implemented Open Library cover fetch (f0760f2):
-   - Added `-lwinhttp` compiler option and `#include <winhttp.h>`
+   - Added `-lwinhttp` compiler option, `#include <winhttp.h>`, `#include <algorithm>`
    - `UrlEncodeTitle`: percent-encodes title for URL query param
-   - `HttpsGet`: synchronous HTTPS GET via WinHTTP (background thread safe)
+   - `HttpsGet`: synchronous HTTPS GET via WinHTTP, background-thread safe
    - `FetchOpenLibraryCover`: two-step title→cover_i→JPEG→Bitmap*
    - `GetOrFetchCover`: LRU cache (5 entries) with miss sentinels
    - Cover cache teardown in WM_DESTROY
-   - Restructured `UpdateMediaInfo`: cover fetch outside g_MediaState.lock
+   - Restructured `UpdateMediaInfo`: cover fetch outside g_MediaState.lock (fixed existing lock-held-during-IO issue)
    - Removed all [THUMB] diagnostic logging
-4. Fixed WINHTTP_NO_REQUEST_BODY (not a real macro → nullptr) (4685c7e).
-5. Tested: cover appeared but "Leviathan" returned "Leviathan Wakes" (false positive).
-6. Fixed title matching (c5a58f8):
-   - Switched from `q=` to `title=` search parameter
-   - Fetch 5 candidates instead of 1
-   - `PickCoverId`: selects exact case-insensitive title match first, falls back to first result
-7. Logged hover-expand panel feature as F1 in OPEN_LOOPS.md for v4.1.0.
-8. Updated CURRENT_STATE.md, OPEN_LOOPS.md, WORK_LOG.md.
+4. Fixed WINHTTP_NO_REQUEST_BODY compile error — not a real WinHTTP macro, replaced with nullptr (4685c7e).
+5. Live test: cover appeared but "Leviathan" returned "Leviathan Wakes" (false positive from popularity ranking).
+6. Fixed title matching (c5a58f8): switched to `title=` field search, fetch 5 candidates, exact-match selection.
+7. v4.1.0 refinements + right-click cover menu (3c59aaa):
+   - `StripSubtitle`: strips after `:` or ` - ` before querying OL (handles "Title: Subtitle" audiobook naming)
+   - `PickCoverId`: no first-result fallback; accepts stripped/full/subtitle-variant matches; skips tried IDs
+   - `OLSearchPass` + `DecodeCoverBytes`: refactored into composable helpers
+   - Two-pass fetch: `title=` (precise) then `q=` (broader), both with exclusions
+   - `CoverCacheEntry`: added `suppressed`, `locked`, `currentCoverId`, `triedCoverIds`
+   - `MediaState`: added `isLibby` flag
+   - Right-click menu on cover art (Libby sessions only, art-area hit-test):
+     - "Try Different Cover" — background refetch skipping tried cover IDs
+     - "Remove Cover" — suppresses cover for this title
+     - "🔓 Lock Cover" / "🔒 Unlock Cover" — pins current cover, greys out destructive items
+     - "Restore Cover" — clears suppression/lock, re-fetches on next poll
+   - @version bumped 4.0.1 → 4.1.0; readme updated with Libby Support bullet
+8. Fixed race condition: "Try Different Cover" reverted to wrong cover within 1 second (2239ae2):
+   - Root cause: poll timer fired while HandleCoverWrong's thread was mid-fetch; GetOrFetchCover used empty excluded list and fetched wrong cover; whichever thread finished last won
+   - Fix 1: GetOrFetchCover carries `triedCoverIds` from fetched=false entry so concurrent poll uses same exclusions
+   - Fix 2: GetOrFetchCover updates existing cache entry in-place (not push_back) to prevent duplicate entries
+9. Added Lock Cover feature (f4fdafa, b9ff69b):
+   - `locked` flag on CoverCacheEntry; GetOrFetchCover returns pinned bitmap immediately when locked
+   - Menu item toggles label: "🔓 Lock Cover" → "🔒 Unlock Cover"
+   - Locked state greys out Try Different Cover and Remove Cover
+10. Updated CURRENT_STATE.md, OPEN_LOOPS.md, WORK_LOG.md, Changelog.txt.
+
+### Commits this session
+
+| Commit  | Description |
+|---------|-------------|
+| f0760f2 | feat: fetch Libby cover art from Open Library Covers API |
+| 4685c7e | fix: WINHTTP_NO_REQUEST_BODY → nullptr |
+| c5a58f8 | fix: improve OL title matching (title= search, exact match, 5 candidates) |
+| 1241d03 | chore: RAIDEN state mid-session checkpoint |
+| 3c59aaa | feat: v4.1.0 — refinements + right-click cover menu |
+| 2239ae2 | fix: prevent wrong-cover revert race condition |
+| f4fdafa | feat: Lock Cover right-click action |
+| b9ff69b | feat: lock/unlock emoji label toggle on Lock Cover item |
 
 ### Status at session end
 
-Libby cover art and title handling complete and tested. One confirmed false-positive fix applied.
-Hover-expand panel deferred to v4.1.0. Cover art refinement for other audiobook sources (Audible etc.) in progress next.
+v4.1.0 shipped. All Libby cover art features complete and tested.
+Hover-expand panel deferred to v4.2.0. Session closed.

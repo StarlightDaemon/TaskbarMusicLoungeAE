@@ -1,3 +1,56 @@
+Taskbar Music Lounge SD — Changelog
+=====================================
+
+v4.1.0 — 2026-05-08 (StarlightDaemon fork)
+--------------------------------------------
+Libby (libbyapp.com) audiobook support.
+
+  Cover art
+  - Fetches book cover from Open Library Covers API when Libby is the
+    active media session. No authentication or setup required.
+  - Two-pass search: title-field (precise) then full-text (broader),
+    both with subtitle stripping ("Title: Subtitle" searches "Title").
+  - Exact title matching only — never shows a cover for the wrong book.
+  - 5-entry in-memory LRU cache; misses stored as sentinels so failed
+    titles are not re-fetched within the same session.
+
+  Title
+  - Strips the "Libby - Open: " prefix from GSMTC tab title so the
+    widget shows just the book name (e.g. "Wool", "Leviathan").
+
+  Right-click cover menu (right-click the cover art square, Libby only)
+  - Try Different Cover — fetches the next Open Library candidate,
+    skipping covers already shown.
+  - Remove Cover — suppresses the cover for this title this session.
+  - 🔓 Lock Cover / 🔒 Unlock Cover — pins the current cover image;
+    greys out Try Different Cover and Remove Cover while locked.
+  - Restore Cover — clears suppression and lock; re-fetches on next poll.
+
+  Bug fixes
+  - Fixed race condition where Try Different Cover reverted within one
+    second: poll timer now inherits the exclusion list and the cache
+    entry is updated in-place rather than duplicated.
+  - Fixed cover fetch holding g_MediaState.lock during HTTP IO.
+
+
+v4.0.1-SD — 2026-05-08 (StarlightDaemon fork)
+-----------------------------------------------
+Fork baseline from upstream taskbar-music-lounge v4.0.1 by Hashah2311.
+Resolved all 7 bugs identified in internal review.
+
+  Bug 1 — Null dereference on window creation failure.
+  Bug 2 — WM_APP message collision (APP_WM_CLOSE = WM_APP).
+  Bug 3 — Dead g_Running flag removed.
+  Bug 4 — SendMediaCommand targeted wrong GSMTC session.
+  Bug 5 — Blocking WinRT IO ran on the message thread.
+  Bug 6 — IDT_ANIMATION timer not killed when scrolling stopped.
+  Bug 7 — LOWORD/HIWORD mouse coords broke on multi-monitor setups.
+
+  Fork: mod ID taskbar-music-lounge-sd, author StarlightDaemon, MIT license.
+
+
+------- Upstream changelog (Hashah2311) below this line -------
+
 4.0.1 (Mar 22, 2026)
 
 Fixes the widget appearing at top-left of screen on startup.
