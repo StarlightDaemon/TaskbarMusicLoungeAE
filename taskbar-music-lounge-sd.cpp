@@ -331,22 +331,62 @@ static vector<BYTE> HttpsGet(LPCWSTR host, LPCWSTR path) {
     return result;
 }
 
+// Parse Open Library search results: return cover_i of exact title match,
+// falling back to first result with a cover if no exact match exists.
+static string PickCoverId(const string& json, const string& targetLower) {
+    string firstId, exactId;
+    auto docsPos = json.find("\"docs\":[");
+    if (docsPos == string::npos) return {};
+    size_t pos = docsPos + strlen("\"docs\":[");
+
+    while (pos < json.size() && exactId.empty()) {
+        auto objStart = json.find('{', pos);
+        if (objStart == string::npos) break;
+        // Find matching closing brace (no nesting in these docs)
+        auto objEnd = json.find('}', objStart);
+        if (objEnd == string::npos) break;
+        string doc = json.substr(objStart, objEnd - objStart + 1);
+
+        string coverId;
+        auto cp = doc.find("\"cover_i\":");
+        if (cp != string::npos) {
+            cp += strlen("\"cover_i\":");
+            while (cp < doc.size() && (doc[cp] == ' ' || doc[cp] == '\t')) ++cp;
+            while (cp < doc.size() && isdigit((unsigned char)doc[cp])) coverId += doc[cp++];
+        }
+
+        string docTitle;
+        auto tp = doc.find("\"title\":\"");
+        if (tp != string::npos) {
+            tp += strlen("\"title\":\"");
+            while (tp < doc.size() && doc[tp] != '"') docTitle += doc[tp++];
+            transform(docTitle.begin(), docTitle.end(), docTitle.begin(), ::tolower);
+        }
+
+        if (!coverId.empty()) {
+            if (firstId.empty()) firstId = coverId;
+            if (docTitle == targetLower) exactId = coverId;
+        }
+        pos = objEnd + 1;
+        if (pos < json.size() && json[pos] == ']') break;
+    }
+    return exactId.empty() ? firstId : exactId;
+}
+
 // Two-step Open Library lookup: title → cover_i → JPEG bytes → Bitmap*.
+// Uses title-field search and exact-match selection to avoid false positives.
 // Returns nullptr on any miss or network failure.
 static Bitmap* FetchOpenLibraryCover(const wstring& title) {
-    wstring searchPath = L"/search.json?q=" + UrlEncodeTitle(title) + L"&fields=cover_i&limit=1";
+    // title= searches the title field specifically (more precise than q=)
+    wstring searchPath = L"/search.json?title=" + UrlEncodeTitle(title) + L"&fields=cover_i,title&limit=5";
     auto jsonBytes = HttpsGet(L"openlibrary.org", searchPath.c_str());
     if (jsonBytes.empty()) return nullptr;
 
     string json(jsonBytes.begin(), jsonBytes.end());
-    const char* key = "\"cover_i\":";
-    auto pos = json.find(key);
-    if (pos == string::npos) return nullptr;
-    pos += strlen(key);
-    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) ++pos;
-    if (pos >= json.size() || !isdigit((unsigned char)json[pos])) return nullptr;
-    string coverId;
-    while (pos < json.size() && isdigit((unsigned char)json[pos])) coverId += json[pos++];
+    string targetLower(title.begin(), title.end());
+    transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
+
+    string coverId = PickCoverId(json, targetLower);
     if (coverId.empty()) return nullptr;
 
     wstring wCoverId(coverId.begin(), coverId.end());
