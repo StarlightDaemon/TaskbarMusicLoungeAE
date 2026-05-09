@@ -5,6 +5,7 @@
 // @version         1.0.0
 // @author          StarlightDaemon
 // @github          https://github.com/StarlightDaemon
+// @homepage        https://www.starlightdaemon.dev/
 // @include         explorer.exe
 // @compilerOptions -lole32 -ldwmapi -lgdi32 -luser32 -lwindowsapp -lshcore -lgdiplus -lshell32 -lwinhttp
 // @license         MIT
